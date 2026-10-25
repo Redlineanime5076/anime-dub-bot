@@ -4,7 +4,7 @@ import time
 import os
 import re
 
-BOT_TOKEN = "8998736470:AAHiylMwe-hq-IvBlKTG98BRBuT4-gwJ4g0"
+BOT_TOKEN = "8860854294:AAHN0DXvFJaYhsYSf8vw5RoopR5WsjIbP6Y"
 RSS_FEED_URL = "https://www.google.com/alerts/feeds/08259172825669750815/11707887614607197427"
 CHAT_ID = "7154131818"  # আপনার টেলিগ্রাম চ্যাট আইডি এখানে বসান
 
