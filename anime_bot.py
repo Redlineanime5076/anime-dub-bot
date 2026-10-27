@@ -2,28 +2,42 @@ import os
 import requests
 import feedparser
 
-# Telegram Bot Configurations
+# Telegram Bot Credentials
 BOT_TOKEN = "8998736470:AAH1yImwe-hq-IVB1ktG98BRbUt4-gwJ4g"
 CHAT_ID = "7154131818"
 
-# RSS Feed URL from MyAnimeList
-RSS_URL = "https://myanimelist.net/rss/news.xml"
+# 3 Major Anime News RSS Feeds
+RSS_FEEDS = [
+    {
+        "name": "MyAnimeList",
+        "url": "https://myanimelist.net/rss/news.xml"
+    },
+    {
+        "name": "Anime News Network",
+        "url": "https://www.animenewsnetwork.com/news/rss.xml"
+    },
+    {
+        "name": "Crunchyroll News",
+        "url": "https://cr-news-api-service.prd.crunchyrollsvc.com/v1/en-US/rss"
+    }
+]
+
 HISTORY_FILE = "sent_posts.txt"
 
 def load_sent_posts():
-    """Load previously sent post IDs/links from history file."""
+    """Load previously sent post IDs/links to avoid duplicates."""
     if not os.path.exists(HISTORY_FILE):
         return set()
     with open(HISTORY_FILE, "r", encoding="utf-8") as f:
         return set(line.strip() for line in f if line.strip())
 
 def save_sent_post(post_id):
-    """Save newly sent post ID/link to history file."""
+    """Save new post ID/link to history file."""
     with open(HISTORY_FILE, "a", encoding="utf-8") as f:
         f.write(f"{post_id}\n")
 
 def send_telegram_message(message):
-    """Send text message to Telegram chat via Bot API."""
+    """Send message to Telegram chat via Bot API."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
@@ -31,46 +45,64 @@ def send_telegram_message(message):
         "parse_mode": "HTML",
         "disable_web_page_preview": False
     }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    }
     try:
-        response = requests.post(url, json=payload, timeout=15)
+        response = requests.post(url, json=payload, headers=headers, timeout=15)
         response.raise_for_status()
-        print("Notification sent successfully.")
+        print("Message sent successfully.")
     except Exception as e:
-        print(f"Error sending message: {e}")
+        print(f"Error sending message to Telegram: {e}")
+
+def fetch_feed(url):
+    """Fetch RSS feed content safely with headers to prevent block."""
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    try:
+        res = requests.get(url, headers=headers, timeout=15)
+        res.raise_for_status()
+        return feedparser.parse(res.content)
+    except Exception as e:
+        print(f"Error fetching feed {url}: {e}")
+        return feedparser.parse("")
 
 def main():
     sent_posts = load_sent_posts()
-    feed = feedparser.parse(RSS_URL)
+    new_posts_found = 0
 
-    if not feed.entries:
-        print("No entries found in the RSS feed.")
-        return
+    for feed_info in RSS_FEEDS:
+        source_name = feed_info["name"]
+        feed_url = feed_info["url"]
 
-    # Process items from oldest to newest among the latest entries
-    new_entries = []
-    for entry in reversed(feed.entries[:10]):
-        post_id = entry.get("id", entry.get("link"))
-        if post_id not in sent_posts:
-            new_entries.append(entry)
+        feed = fetch_feed(feed_url)
+        if not feed.entries:
+            continue
 
-    if not new_entries:
-        print("No new anime updates found.")
-        return
+        # Check latest 5 entries from each source (oldest to newest)
+        for entry in reversed(feed.entries[:5]):
+            post_id = entry.get("id") or entry.get("link")
+            if not post_id or post_id in sent_posts:
+                continue
 
-    for entry in new_entries:
-        title = entry.get("title", "Anime News Update")
-        link = entry.get("link", "")
-        published = entry.get("published", "")
+            title = entry.get("title", "Anime News Update").strip()
+            link = entry.get("link", "").strip()
+            published = entry.get("published", entry.get("updated", "")).strip()
 
-        caption = (
-            f"📢 <b>{title}</b>\n\n"
-            f"📅 Date: {published}\n"
-            f"🔗 Read more: {link}"
-        )
+            caption = (
+                f"🔥 <b>[{source_name}]</b>\n\n"
+                f"📢 <b>{title}</b>\n\n"
+            )
+            if published:
+                caption += f"📅 <i>{published}</i>\n"
+            caption += f"🔗 <a href='{link}'>Read Full Article</a>"
 
-        send_telegram_message(caption)
-        post_id = entry.get("id", entry.get("link"))
-        save_sent_post(post_id)
+            send_telegram_message(caption)
+            save_sent_post(post_id)
+            sent_posts.add(post_id)
+            new_posts_found += 1
+
+    if new_posts_found == 0:
+        print("No new updates found across all feeds.")
 
 if __name__ == "__main__":
     main()
