@@ -2,8 +2,8 @@ name: Anime Global News Scheduler
 
 on:
   schedule:
-    # Runs every 10 minutes (*:00, *:10, *:20, *:30, *:40, *:50)
-    - cron: '*/10 * * * *'
+    # Runs every 30 minutes (*:00 and *:30)
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 jobs:
