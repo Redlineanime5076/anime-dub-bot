@@ -5,7 +5,7 @@ import os
 import re
 
 BOT_TOKEN = "8860854294:AAHN0DXvFJaYhsYSf8vw5RoopR5WsjIbP6Y"
-RSS_FEED_URL = "https://www.google.com/alerts/feeds/08259172825669750815/11707887614607197427"
+RSS_FEED_URL = "https://myanimelist.net/rss/news.xml"
 CHAT_ID = "7154131818"  # আপনার টেলিগ্রাম চ্যাট আইডি এখানে বসান
 
 SEEN_FILE = "seen_articles.txt"
