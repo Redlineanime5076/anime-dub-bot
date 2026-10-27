@@ -1,30 +1,29 @@
-import feedparser
-import requests
-import time
 import os
-import re
+import requests
+import feedparser
 
-BOT_TOKEN = "8860854294:AAHN0DXvFJaYhsYSf8vw5RoopR5WsjIbP6Y"
-RSS_FEED_URL = "https://myanimelist.net/rss/news.xml"
-CHAT_ID = "7154131818"  # আপনার টেলিগ্রাম চ্যাট আইডি এখানে বসান
+# Telegram Bot Configurations
+BOT_TOKEN = "8998736470:AAH1yImwe-hq-IVB1ktG98BRbUt4-gwJ4g"
+CHAT_ID = "7154131818"
 
-SEEN_FILE = "seen_articles.txt"
+# RSS Feed URL from MyAnimeList
+RSS_URL = "https://myanimelist.net/rss/news.xml"
+HISTORY_FILE = "sent_posts.txt"
 
-def load_seen_articles():
-    if not os.path.exists(SEEN_FILE):
+def load_sent_posts():
+    """Load previously sent post IDs/links from history file."""
+    if not os.path.exists(HISTORY_FILE):
         return set()
-    with open(SEEN_FILE, "r", encoding="utf-8") as f:
+    with open(HISTORY_FILE, "r", encoding="utf-8") as f:
         return set(line.strip() for line in f if line.strip())
 
-def save_article_id(article_id):
-    with open(SEEN_FILE, "a", encoding="utf-8") as f:
-        f.write(article_id + "\n")
+def save_sent_post(post_id):
+    """Save newly sent post ID/link to history file."""
+    with open(HISTORY_FILE, "a", encoding="utf-8") as f:
+        f.write(f"{post_id}\n")
 
-def clean_html(raw_html):
-    cleanr = re.compile('<.*?>')
-    return re.sub(cleanr, '', raw_html)
-
-def send_telegram(message):
+def send_telegram_message(message):
+    """Send text message to Telegram chat via Bot API."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
@@ -33,52 +32,45 @@ def send_telegram(message):
         "disable_web_page_preview": False
     }
     try:
-        requests.post(url, data=payload, timeout=10)
+        response = requests.post(url, json=payload, timeout=15)
+        response.raise_for_status()
+        print("Notification sent successfully.")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error sending message: {e}")
 
 def main():
-    seen_articles = load_seen_articles()
-    feed = feedparser.parse(RSS_FEED_URL)
-    
-    new_found = 0
+    sent_posts = load_sent_posts()
+    feed = feedparser.parse(RSS_URL)
 
-    for entry in reversed(feed.entries):
-        entry_id = entry.get("id", entry.get("link"))
+    if not feed.entries:
+        print("No entries found in the RSS feed.")
+        return
 
-        if entry_id not in seen_articles:
-            raw_title = entry.get("title", "No Title")
-            title = clean_html(raw_title)
+    # Process items from oldest to newest among the latest entries
+    new_entries = []
+    for entry in reversed(feed.entries[:10]):
+        post_id = entry.get("id", entry.get("link"))
+        if post_id not in sent_posts:
+            new_entries.append(entry)
 
-            link = entry.get("link", "")
-            if "url=" in link:
-                try:
-                    link = link.split("url=")[1].split("&")[0]
-                except IndexError:
-                    pass
+    if not new_entries:
+        print("No new anime updates found.")
+        return
 
-            raw_snippet = entry.get("summary", "")
-            snippet = clean_html(raw_snippet)
-            if len(snippet) > 200:
-                snippet = snippet[:200] + "..."
+    for entry in new_entries:
+        title = entry.get("title", "Anime News Update")
+        link = entry.get("link", "")
+        published = entry.get("published", "")
 
-            msg = (
-                f"🚨 <b>নতুন হিন্দি ডাব আপডেট!</b>\n\n"
-                f"📌 <b>{title}</b>\n\n"
-                f"📝 <i>{snippet}</i>\n\n"
-                f"🔗 <a href='{link}'>বিস্তারিত পড়ুন</a>"
-            )
-            send_telegram(msg)
-            save_article_id(entry_id)
-            seen_articles.add(entry_id)
-            new_found += 1
-            time.sleep(1.5)
+        caption = (
+            f"📢 <b>{title}</b>\n\n"
+            f"📅 Date: {published}\n"
+            f"🔗 Read more: {link}"
+        )
 
-    if new_found == 0:
-        print("কোনো নতুন আপডেট নেই।")
-    else:
-        print(f"{new_found}টি নতুন আপডেট পাঠানো হয়েছে।")
+        send_telegram_message(caption)
+        post_id = entry.get("id", entry.get("link"))
+        save_sent_post(post_id)
 
 if __name__ == "__main__":
     main()
-          
