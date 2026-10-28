@@ -9,6 +9,10 @@ CHAT_ID = "7154131818"
 # 3 Major Anime News RSS Feeds
 RSS_FEEDS = [
     {
+        "name": "Google News (Anime)",
+        "url": "https://news.google.com/rss/search?q=anime&hl=en-US&gl=US&ceid=US:en"
+    },
+    {
         "name": "MyAnimeList",
         "url": "https://myanimelist.net/rss/news.xml"
     },
@@ -19,8 +23,17 @@ RSS_FEEDS = [
     {
         "name": "Crunchyroll News",
         "url": "https://cr-news-api-service.prd.crunchyrollsvc.com/v1/en-US/rss"
+    },
+    {
+        "name": "ComicBook Anime",
+        "url": "https://comicbook.com/anime/rss.xml"
+    },
+    {
+        "name": "Otaku USA",
+        "url": "https://otakuusamagazine.com/feed/"
     }
 ]
+
 
 HISTORY_FILE = "sent_posts.txt"
 
