@@ -31,7 +31,36 @@ RSS_FEEDS = [
     {
         "name": "Otaku USA",
         "url": "https://otakuusamagazine.com/feed/"
+    },
+        {
+        "name": "Otaku USA",
+        "url": "https://otakuusamagazine.com/feed/"
+    },
+    {
+        "name": "ComicBook Anime",
+        "url": "https://comicbook.com/anime/rss.xml"
+    },
+    {
+        "name": "CBR Anime",
+        "url": "https://www.cbr.com/feed/category/anime/"
+    },
+    {
+        "name": "Screen Rant Anime",
+        "url": "https://screenrant.com/feed/category/anime/"
+    },
+    {
+        "name": "Game Rant Anime",
+        "url": "https://gamerant.com/feed/category/anime/"
+    },
+    {
+        "name": "Siliconera Anime",
+        "url": "https://www.siliconera.com/category/anime/feed/"
+    },
+    {
+        "name": "Google Anime News",
+        "url": "https://news.google.com/rss/search?q=anime+news&hl=en-US&gl=US&ceid=US:en"
     }
+    
 ]
 
 
