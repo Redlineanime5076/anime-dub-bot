@@ -5,8 +5,13 @@ import html
 import requests
 import feedparser
 
-BOT_TOKEN = "8860854294:AAHsReqbeODDY6bvLjEwq3y_h-ycG2Zb2Rs"
+# GitHub Secrets থেকে টোকেন নেওয়া হচ্ছে
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = "@databaceforredlineanime"
+
+if not BOT_TOKEN:
+    print("❌ BOT_TOKEN পাওয়া যায়নি! GitHub Secrets ঠিকভাবে সেট করা হয়েছে কি না দেখুন।")
+    sys.exit(1)
 
 POSTS_PER_FEED = 2
 HISTORY_FILE = "sent_posts.txt"
