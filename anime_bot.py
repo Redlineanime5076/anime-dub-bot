@@ -59,7 +59,23 @@ RSS_FEEDS = [
     {
         "name": "Google Anime News",
         "url": "https://news.google.com/rss/search?q=anime+news&hl=en-US&gl=US&ceid=US:en"
-    }
+    },
+        # Reddit Feeds
+    {"name": "Reddit r/anime News", "url": "https://www.reddit.com/r/anime/search.rss?q=flair%3ANews&restrict_sr=on&sort=new"},
+    {"name": "Reddit r/AnimeDubs", "url": "https://www.reddit.com/r/AnimeDubs/.rss"},
+
+    # X / Twitter Feeds via Nitter
+    {"name": "Crunchyroll Twitter", "url": "https://nitter.net/Crunchyroll/rss"},
+    {"name": "AIR Anime Research Twitter", "url": "https://nitter.net/AIR_News01/rss"},
+
+    # Official YouTube Trailers
+    {"name": "Crunchyroll Trailers YouTube", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCGQnWhqcwG23p1eEptmkTzA"},
+    {"name": "TOHO Animation YouTube", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UChLQ_5HP9w46RwnkkdP3peQ"},
+
+    # Anime Portals
+    {"name": "SoraNews Anime", "url": "https://soranews24.com/category/anime/feed/"},
+    {"name": "Anime Geek", "url": "https://www.monstersandcritics.com/anime/feed/"}
+    
     
 ]
 
