@@ -5,7 +5,7 @@ import feedparser
 
 # Telegram Bot Credentials
 BOT_TOKEN = "8998736470:AAH1yImwe-hq-IVB1ktG98BRbUt4-gwJ4g"
-CHAT_ID = "7154131818"
+CHAT_ID = "-1004472229971"
 
 # All Cleaned Anime News RSS Feeds
 RSS_FEEDS = [
