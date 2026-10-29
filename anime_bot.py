@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 import feedparser
 
@@ -6,7 +7,7 @@ import feedparser
 BOT_TOKEN = "8998736470:AAH1yImwe-hq-IVB1ktG98BRbUt4-gwJ4g"
 CHAT_ID = "7154131818"
 
-# All Anime News RSS Feeds
+# All Cleaned Anime News RSS Feeds
 RSS_FEEDS = [
     {
         "name": "Google News (Anime)",
@@ -48,7 +49,6 @@ RSS_FEEDS = [
         "name": "Siliconera Anime",
         "url": "https://www.siliconera.com/category/anime/feed/"
     },
-    # Reddit Feeds
     {
         "name": "Reddit r/anime News",
         "url": "https://www.reddit.com/r/anime/search.rss?q=flair%3ANews&restrict_sr=on&sort=new"
@@ -57,7 +57,6 @@ RSS_FEEDS = [
         "name": "Reddit r/AnimeDubs",
         "url": "https://www.reddit.com/r/AnimeDubs/.rss"
     },
-    # X / Twitter Feeds via Nitter
     {
         "name": "Crunchyroll Twitter",
         "url": "https://nitter.net/Crunchyroll/rss"
@@ -66,7 +65,6 @@ RSS_FEEDS = [
         "name": "AIR Anime Research Twitter",
         "url": "https://nitter.net/AIR_News01/rss"
     },
-    # Official YouTube Trailers
     {
         "name": "Crunchyroll Trailers YouTube",
         "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCGQnWhqcwG23p1eEptmkTzA"
@@ -75,7 +73,6 @@ RSS_FEEDS = [
         "name": "TOHO Animation YouTube",
         "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UChLQ_5HP9w46RwnkkdP3peQ"
     },
-    # Anime Portals
     {
         "name": "SoraNews Anime",
         "url": "https://soranews24.com/category/anime/feed/"
@@ -85,7 +82,6 @@ RSS_FEEDS = [
         "url": "https://www.monstersandcritics.com/anime/feed/"
     }
 ]
-
 
 HISTORY_FILE = "sent_posts.txt"
 
@@ -102,7 +98,7 @@ def save_sent_post(post_id):
         f.write(f"{post_id}\n")
 
 def send_telegram_message(message):
-    """Send message to Telegram chat via Bot API."""
+    """Send message to Telegram chat via Bot API safely."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
@@ -116,9 +112,11 @@ def send_telegram_message(message):
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=15)
         response.raise_for_status()
-        print("Message sent successfully.")
+        time.sleep(1.5)  # Telegram flood limit এড়াতে ১.৫ সেকেন্ড বিরতি
+        return True
     except Exception as e:
         print(f"Error sending message to Telegram: {e}")
+        return False
 
 def fetch_feed(url):
     """Fetch RSS feed content safely with headers to prevent block."""
@@ -143,8 +141,8 @@ def main():
         if not feed.entries:
             continue
 
-        # Check latest 5 entries from each source (oldest to newest)
-        for entry in reversed(feed.entries[:5]):
+        # Check latest 3 entries from each source (oldest to newest)
+        for entry in reversed(feed.entries[:3]):
             post_id = entry.get("id") or entry.get("link")
             if not post_id or post_id in sent_posts:
                 continue
@@ -161,10 +159,11 @@ def main():
                 caption += f"📅 <i>{published}</i>\n"
             caption += f"🔗 <a href='{link}'>Read Full Article</a>"
 
-            send_telegram_message(caption)
-            save_sent_post(post_id)
-            sent_posts.add(post_id)
-            new_posts_found += 1
+            # মেসেজ সফলভাবে ডেলিভার হলেই কেবল হিস্ট্রিতে সেভ হবে
+            if send_telegram_message(caption):
+                save_sent_post(post_id)
+                sent_posts.add(post_id)
+                new_posts_found += 1
 
     if new_posts_found == 0:
         print("No new updates found across all feeds.")
