@@ -6,7 +6,7 @@ import feedparser
 
 # Telegram Credentials
 BOT_TOKEN = "8998736470:AAH1yImwe-hq-IVB1ktG98BRbUt4-gwJ4g"
-CHAT_ID = "-1004472229971"
+CHAT_ID = "@databaceforredlineanime"  # আপনার চ্যানেলের পাবলিক ইউজারনেম
 
 # All Active Anime News RSS Feeds
 RSS_FEEDS = [
@@ -31,16 +31,19 @@ RSS_FEEDS = [
 HISTORY_FILE = "sent_posts.txt"
 
 def load_sent_posts():
+    """Load previously sent post IDs/links to avoid duplicates."""
     if not os.path.exists(HISTORY_FILE):
         return set()
     with open(HISTORY_FILE, "r", encoding="utf-8") as f:
         return set(line.strip() for line in f if line.strip())
 
 def save_sent_post(post_id):
+    """Save new post ID/link to history file."""
     with open(HISTORY_FILE, "a", encoding="utf-8") as f:
         f.write(f"{post_id}\n")
 
 def send_telegram_message(message):
+    """Send message to Telegram channel safely."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
@@ -62,6 +65,7 @@ def send_telegram_message(message):
         return False
 
 def fetch_feed(url):
+    """Fetch RSS feed content safely with headers."""
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
         res = requests.get(url, headers=headers, timeout=15)
@@ -83,6 +87,7 @@ def main():
         if not feed.entries:
             continue
 
+        # সাম্প্রতিক খবরগুলো নিয়ে আসার জন্য (প্রতি সোর্স থেকে ২টি করে)
         for entry in reversed(feed.entries[:2]):
             post_id = entry.get("id") or entry.get("link")
             if not post_id or post_id in sent_posts:
@@ -92,7 +97,7 @@ def main():
             link = entry.get("link", "").strip()
             published = entry.get("published", entry.get("updated", "")).strip()
 
-            # HTML ক্যারেক্টার ক্লিন করা
+            # HTML ফরম্যাটিং যাতে না ভাঙে
             safe_title = html.escape(raw_title)
             safe_source = html.escape(source_name)
 
