@@ -6,7 +6,7 @@ import feedparser
 BOT_TOKEN = "8998736470:AAH1yImwe-hq-IVB1ktG98BRbUt4-gwJ4g"
 CHAT_ID = "7154131818"
 
-# 3 Major Anime News RSS Feeds
+# All Anime News RSS Feeds
 RSS_FEEDS = [
     {
         "name": "Google News (Anime)",
@@ -32,14 +32,6 @@ RSS_FEEDS = [
         "name": "Otaku USA",
         "url": "https://otakuusamagazine.com/feed/"
     },
-        {
-        "name": "Otaku USA",
-        "url": "https://otakuusamagazine.com/feed/"
-    },
-    {
-        "name": "ComicBook Anime",
-        "url": "https://comicbook.com/anime/rss.xml"
-    },
     {
         "name": "CBR Anime",
         "url": "https://www.cbr.com/feed/category/anime/"
@@ -56,27 +48,42 @@ RSS_FEEDS = [
         "name": "Siliconera Anime",
         "url": "https://www.siliconera.com/category/anime/feed/"
     },
+    # Reddit Feeds
     {
-        "name": "Google Anime News",
-        "url": "https://news.google.com/rss/search?q=anime+news&hl=en-US&gl=US&ceid=US:en"
+        "name": "Reddit r/anime News",
+        "url": "https://www.reddit.com/r/anime/search.rss?q=flair%3ANews&restrict_sr=on&sort=new"
     },
-        # Reddit Feeds
-    {"name": "Reddit r/anime News", "url": "https://www.reddit.com/r/anime/search.rss?q=flair%3ANews&restrict_sr=on&sort=new"},
-    {"name": "Reddit r/AnimeDubs", "url": "https://www.reddit.com/r/AnimeDubs/.rss"},
-
+    {
+        "name": "Reddit r/AnimeDubs",
+        "url": "https://www.reddit.com/r/AnimeDubs/.rss"
+    },
     # X / Twitter Feeds via Nitter
-    {"name": "Crunchyroll Twitter", "url": "https://nitter.net/Crunchyroll/rss"},
-    {"name": "AIR Anime Research Twitter", "url": "https://nitter.net/AIR_News01/rss"},
-
+    {
+        "name": "Crunchyroll Twitter",
+        "url": "https://nitter.net/Crunchyroll/rss"
+    },
+    {
+        "name": "AIR Anime Research Twitter",
+        "url": "https://nitter.net/AIR_News01/rss"
+    },
     # Official YouTube Trailers
-    {"name": "Crunchyroll Trailers YouTube", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCGQnWhqcwG23p1eEptmkTzA"},
-    {"name": "TOHO Animation YouTube", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UChLQ_5HP9w46RwnkkdP3peQ"},
-
+    {
+        "name": "Crunchyroll Trailers YouTube",
+        "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCGQnWhqcwG23p1eEptmkTzA"
+    },
+    {
+        "name": "TOHO Animation YouTube",
+        "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UChLQ_5HP9w46RwnkkdP3peQ"
+    },
     # Anime Portals
-    {"name": "SoraNews Anime", "url": "https://soranews24.com/category/anime/feed/"},
-    {"name": "Anime Geek", "url": "https://www.monstersandcritics.com/anime/feed/"}
-    
-    
+    {
+        "name": "SoraNews Anime",
+        "url": "https://soranews24.com/category/anime/feed/"
+    },
+    {
+        "name": "Anime Geek",
+        "url": "https://www.monstersandcritics.com/anime/feed/"
+    }
 ]
 
 
