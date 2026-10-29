@@ -5,7 +5,7 @@ import requests
 import feedparser
 
 # Telegram Credentials
-BOT_TOKEN = "8998736470:AAH1yImwe-hq-IVB1ktG98BRbUt4-gwJ4g"
+BOT_TOKEN = "8860854294:AAHsReqbeODDY6bvLjEwq3y_h-ycG2Zb2Rs"
 CHAT_ID = "@databaceforredlineanime"  # আপনার চ্যানেলের পাবলিক ইউজারনেম
 
 # All Active Anime News RSS Feeds
