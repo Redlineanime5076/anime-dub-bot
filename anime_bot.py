@@ -18,23 +18,31 @@ HISTORY_FILE = "sent_posts.txt"
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 RSS_FEEDS = [
+    # প্রধান অ্যানিমে নিউজ পোর্টাল
     {"name": "Google News (Anime)", "url": "https://news.google.com/rss/search?q=anime&hl=en-US&gl=US&ceid=US:en"},
-    {"name": "MyAnimeList", "url": "https://myanimelist.net/rss/news.xml"},
+    {"name": "MyAnimeList News", "url": "https://myanimelist.net/rss/news.xml"},
     {"name": "Anime News Network", "url": "https://www.animenewsnetwork.com/news/rss.xml"},
     {"name": "Crunchyroll News", "url": "https://cr-news-api-service.prd.crunchyrollsvc.com/v1/en-US/rss"},
-    {"name": "ComicBook Anime", "url": "https://comicbook.com/anime/rss.xml"},
-    {"name": "Otaku USA", "url": "https://otakuusamagazine.com/feed/"},
+    {"name": "Otaku USA Magazine", "url": "https://otakuusamagazine.com/feed/"},
     {"name": "CBR Anime", "url": "https://www.cbr.com/feed/category/anime/"},
-    {"name": "Screen Rant Anime", "url": "https://screenrant.com/feed/category/anime/"},
-    {"name": "Game Rant Anime", "url": "https://gamerant.com/feed/category/anime/"},
-    {"name": "Siliconera Anime", "url": "https://www.siliconera.com/category/anime/feed/"},
-    {"name": "Reddit r/anime News", "url": "https://www.reddit.com/r/anime/search.rss?q=flair%3ANews&restrict_sr=on&sort=new"},
-    {"name": "Reddit r/AnimeDubs", "url": "https://www.reddit.com/r/AnimeDubs/.rss"},
-    {"name": "Crunchyroll Trailers YouTube", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCGQnWhqcwG23p1eEptmkTzA"},
-    {"name": "TOHO Animation YouTube", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UChLQ_5HP9w46RwnkkdP3peQ"},
-    {"name": "SoraNews Anime", "url": "https://soranews24.com/category/anime/feed/"},
-    {"name": "Anime Geek", "url": "https://www.monstersandcritics.com/anime/feed/"},
+    {"name": "Siliconera", "url": "https://www.siliconera.com/category/anime/feed/"},
+    {"name": "Anime UK News", "url": "https://animeuknews.net/feed/"},
+    {"name": "Anime Corner", "url": "https://animecorner.me/feed/"},
+    {"name": "Anime Trending", "url": "https://anitrendz.com/news/feed"},
+
+    # নতুন মাঙ্গা রিলিজ ও অ্যাডাপ্টেশন
+    {"name": "Manga Adaptation News", "url": "https://news.google.com/rss/search?q=manga+anime+adaptation&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "Manga Updates & Announcements", "url": "https://news.google.com/rss/search?q=manga+announcement+anime+adaptation&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "Light Novel Adaptations", "url": "https://news.google.com/rss/search?q=light+novel+anime+adaptation&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "Weekly Shonen Jump News", "url": "https://news.google.com/rss/search?q=shonen+jump+manga+anime&hl=en-US&gl=US&ceid=US:en"},
+
+    # নতুন কি-ভিজুয়াল, ট্রেলার ও রিলিজ ডেট
+    {"name": "Anime Visuals & Teasers", "url": "https://news.google.com/rss/search?q=anime+key+visual+teaser&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "Anime Key Visuals", "url": "https://news.google.com/rss/search?q=anime+new+key+visual&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "Anime Trailer Releases", "url": "https://news.google.com/rss/search?q=anime+official+trailer+teaser&hl=en-US&gl=US&ceid=US:en"},
+    {"name": "Anime Release Dates", "url": "https://news.google.com/rss/search?q=anime+release+date+confirmed&hl=en-US&gl=US&ceid=US:en"}
 ]
+
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
