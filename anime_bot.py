@@ -1,14 +1,17 @@
 import os
+import sys
 import time
 import html
 import requests
 import feedparser
 
-# Telegram Credentials
 BOT_TOKEN = "8860854294:AAHsReqbeODDY6bvLjEwq3y_h-ycG2Zb2Rs"
-CHAT_ID = "@databaceforredlineanime"  # আপনার চ্যানেলের পাবলিক ইউজারনেম
+CHAT_ID = "@databaceforredlineanime"
 
-# All Active Anime News RSS Feeds
+POSTS_PER_FEED = 2
+HISTORY_FILE = "sent_posts.txt"
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+
 RSS_FEEDS = [
     {"name": "Google News (Anime)", "url": "https://news.google.com/rss/search?q=anime&hl=en-US&gl=US&ceid=US:en"},
     {"name": "MyAnimeList", "url": "https://myanimelist.net/rss/news.xml"},
@@ -25,98 +28,149 @@ RSS_FEEDS = [
     {"name": "Crunchyroll Trailers YouTube", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCGQnWhqcwG23p1eEptmkTzA"},
     {"name": "TOHO Animation YouTube", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UChLQ_5HP9w46RwnkkdP3peQ"},
     {"name": "SoraNews Anime", "url": "https://soranews24.com/category/anime/feed/"},
-    {"name": "Anime Geek", "url": "https://www.monstersandcritics.com/anime/feed/"}
+    {"name": "Anime Geek", "url": "https://www.monstersandcritics.com/anime/feed/"},
 ]
 
-HISTORY_FILE = "sent_posts.txt"
+API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
 
 def load_sent_posts():
-    """Load previously sent post IDs/links to avoid duplicates."""
     if not os.path.exists(HISTORY_FILE):
         return set()
     with open(HISTORY_FILE, "r", encoding="utf-8") as f:
         return set(line.strip() for line in f if line.strip())
 
+
 def save_sent_post(post_id):
-    """Save new post ID/link to history file."""
     with open(HISTORY_FILE, "a", encoding="utf-8") as f:
         f.write(f"{post_id}\n")
 
+
+def preflight_check():
+    try:
+        me = requests.get(f"{API}/getMe", timeout=15).json()
+    except Exception as e:
+        print(f"❌ নেটওয়ার্ক সমস্যা: {e}")
+        return False
+    if not me.get("ok"):
+        print(f"❌ টোকেন ভুল বা বাতিল: {me}")
+        return False
+    bot_id = me["result"]["id"]
+    print(f"✅ বট ঠিক আছে: @{me['result']['username']}")
+
+    chat = requests.get(f"{API}/getChat", params={"chat_id": CHAT_ID}, timeout=15).json()
+    if not chat.get("ok"):
+        print(f"❌ CHAT_ID সমস্যা (চ্যানেল পাচ্ছে না): {chat}")
+        return False
+    print(f"✅ চ্যানেল পাওয়া গেছে: {chat['result'].get('title')}")
+
+    member = requests.get(
+        f"{API}/getChatMember",
+        params={"chat_id": CHAT_ID, "user_id": bot_id},
+        timeout=15,
+    ).json()
+    if not member.get("ok"):
+        print(f"❌ বটের স্ট্যাটাস চেক করা যায়নি: {member}")
+        return False
+    info = member["result"]
+    if info.get("status") not in ("administrator", "creator"):
+        print("❌ বট চ্যানেলের অ্যাডমিন নয়। অ্যাডমিন বানান।")
+        return False
+    if info.get("can_post_messages") is False:
+        print("❌ বটের 'Post Messages' পারমিশন নেই।")
+        return False
+    print("✅ বট অ্যাডমিন এবং পোস্ট করতে পারবে।")
+    return True
+
+
 def send_telegram_message(message):
-    """Send message to Telegram channel safely."""
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
         "text": message,
         "parse_mode": "HTML",
-        "disable_web_page_preview": False
+        "disable_web_page_preview": False,
     }
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-    try:
-        response = requests.post(url, json=payload, headers=headers, timeout=15)
-        res_data = response.json()
-        if not res_data.get("ok"):
-            print(f"Telegram API Error: {res_data}")
-            return False
-        time.sleep(2.0)  # Rate limit এড়াতে ২ সেকেন্ড বিরতি
-        return True
-    except Exception as e:
-        print(f"Network error: {e}")
+    for attempt in range(3):
+        try:
+            res = requests.post(f"{API}/sendMessage", json=payload, timeout=15)
+            data = res.json()
+        except Exception as e:
+            print(f"Network error: {e}")
+            time.sleep(3)
+            continue
+
+        if data.get("ok"):
+            time.sleep(3)
+            return True
+
+        if data.get("error_code") == 429:
+            wait = data.get("parameters", {}).get("retry_after", 10)
+            print(f"Rate limit, {wait} সেকেন্ড অপেক্ষা...")
+            time.sleep(wait + 1)
+            continue
+
+        print(f"Telegram API Error: {data}")
         return False
+    return False
+
 
 def fetch_feed(url):
-    """Fetch RSS feed content safely with headers."""
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
-        res = requests.get(url, headers=headers, timeout=15)
+        res = requests.get(url, headers=HEADERS, timeout=15)
         res.raise_for_status()
         return feedparser.parse(res.content)
     except Exception as e:
         print(f"Error fetching {url}: {e}")
         return feedparser.parse("")
 
+
+def build_message(source_name, entry):
+    raw_title = entry.get("title", "Anime News Update").strip()
+    link = entry.get("link", "").strip()
+    published = (entry.get("published") or entry.get("updated") or "").strip()
+
+    msg = (
+        f"🔥 <b>[{html.escape(source_name)}]</b>\n\n"
+        f"📢 <b>{html.escape(raw_title)}</b>\n\n"
+    )
+    if published:
+        msg += f"📅 <i>{html.escape(published)}</i>\n"
+    if link:
+        msg += f'🔗 <a href="{html.escape(link, quote=True)}">Read Full Article</a>'
+    return msg, raw_title
+
+
 def main():
+    if not preflight_check():
+        sys.exit(1)
+
     sent_posts = load_sent_posts()
     new_posts_found = 0
 
     for feed_info in RSS_FEEDS:
         source_name = feed_info["name"]
-        feed_url = feed_info["url"]
-
-        feed = fetch_feed(feed_url)
+        feed = fetch_feed(feed_info["url"])
         if not feed.entries:
+            print(f"⚠️ কোনো এন্ট্রি নেই: {source_name}")
             continue
 
-        # সাম্প্রতিক খবরগুলো নিয়ে আসার জন্য (প্রতি সোর্স থেকে ২টি করে)
-        for entry in reversed(feed.entries[:2]):
+        for entry in reversed(feed.entries[:POSTS_PER_FEED]):
             post_id = entry.get("id") or entry.get("link")
             if not post_id or post_id in sent_posts:
                 continue
 
-            raw_title = entry.get("title", "Anime News Update").strip()
-            link = entry.get("link", "").strip()
-            published = entry.get("published", entry.get("updated", "")).strip()
-
-            # HTML ফরম্যাটিং যাতে না ভাঙে
-            safe_title = html.escape(raw_title)
-            safe_source = html.escape(source_name)
-
-            caption = (
-                f"🔥 <b>[{safe_source}]</b>\n\n"
-                f"📢 <b>{safe_title}</b>\n\n"
-            )
-            if published:
-                caption += f"📅 <i>{html.escape(published)}</i>\n"
-            caption += f"🔗 <a href='{link}'>Read Full Article</a>"
-
-            if send_telegram_message(caption):
+            message, raw_title = build_message(source_name, entry)
+            if send_telegram_message(message):
                 save_sent_post(post_id)
                 sent_posts.add(post_id)
                 new_posts_found += 1
-                print(f"Posted to Telegram: {raw_title[:30]}")
+                print(f"✅ Posted: {raw_title[:40]}")
 
     if new_posts_found == 0:
         print("No new updates found.")
+    else:
+        print(f"মোট {new_posts_found}টি নতুন পোস্ট পাঠানো হয়েছে।")
+
 
 if __name__ == "__main__":
     main()
