@@ -18,6 +18,10 @@ if not BOT_TOKEN:
 
 POSTS_PER_FEED = 2
 HISTORY_FILE = "sent_posts.txt"
+
+# False রাখলে লিংকের নিচে জাপানি টাইটেলের প্রিভিউ কার্ড আসবে না
+SHOW_LINK_PREVIEW = True
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
@@ -28,24 +32,33 @@ CUTOFF_DATE = datetime(2026, 10, 29, 0, 0, 0, tzinfo=timezone.utc)
 # অটো ট্রান্সলেটর সেটআপ
 translator = GoogleTranslator(source="auto", target="en")
 
+JP_RE = re.compile(r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]")
+
+
 def translate_if_japanese(text):
-    """টেক্সটে জাপানি অক্ষর থাকলে তা ইংরেজিতে অনুবাদ করে"""
-    if not text:
-        return text
-    jp_pattern = re.compile(r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]")
-    if jp_pattern.search(text):
+    """(টেক্সট, সফল কিনা) ফেরত দেয়। জাপানি থাকলে ৩ বার অনুবাদের চেষ্টা করে।"""
+    if not text or not JP_RE.search(text):
+        return text, True
+
+    for attempt in range(3):
         try:
-            return translator.translate(text)
+            out = translator.translate(text)
+            if out and not JP_RE.search(out):
+                return out, True
         except Exception as e:
-            print(f"Translation Error: {e}")
-            return text
-    return text
+            print(f"Translation Error (try {attempt + 1}): {e}")
+        time.sleep(2)
+
+    return text, False
+
 
 def gnews(q, lang="en", country="US"):
     return f"https://news.google.com/rss/search?q={quote(q)}&hl={lang}-{country}&gl={country}&ceid={country}:{lang}"
 
+
 def gnews_jp(q):
     return f"https://news.google.com/rss/search?q={quote(q)}&hl=ja&gl=JP&ceid=JP:ja"
+
 
 RSS_FEEDS = [
     # প্রধান গ্লোবাল অ্যানিমে নিউজ পোর্টাল
@@ -101,7 +114,7 @@ RSS_FEEDS = [
     {"name": "JP Trailer/PV", "url": gnews_jp("アニメ 本予告 OR PV公開")},
     {"name": "JP Episode Preview (先行カット)", "url": gnews_jp("アニメ 第 先行カット OR あらすじ")},
     {"name": "JP Box Office Records", "url": gnews_jp("劇場アニメ 興行収入 突破")},
-    {"name": "JP Ranking Record", "url": gnews_jp("アニメ ランキング 1位 獲得")}
+    {"name": "JP Ranking Record", "url": gnews_jp("アニメ ランキング 1位 獲得")},
 ]
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -161,7 +174,7 @@ def send_telegram_message(message):
         "chat_id": CHAT_ID,
         "text": message,
         "parse_mode": "HTML",
-        "disable_web_page_preview": False,
+        "disable_web_page_preview": not SHOW_LINK_PREVIEW,
     }
     for attempt in range(3):
         try:
@@ -217,8 +230,8 @@ def build_message(source_name, entry, entry_dt):
     link = entry.get("link", "").strip()
     published = format_to_ist(entry_dt, entry)
 
-    # জাপানি টেক্সট শনাক্ত হলে স্বয়ংক্রিয়ভাবে ইংরেজিতে অনুবাদ করবে
-    translated_title = translate_if_japanese(raw_title)
+    # জাপানি টেক্সট শনাক্ত হলে ইংরেজিতে অনুবাদ করবে
+    translated_title, ok = translate_if_japanese(raw_title)
 
     msg = (
         f"🔥 <b>[{html.escape(source_name)}]</b>\n\n"
@@ -228,7 +241,7 @@ def build_message(source_name, entry, entry_dt):
         msg += f"📅 <i>{html.escape(published)}</i>\n"
     if link:
         msg += f'🔗 <a href="{html.escape(link, quote=True)}">Read Full Article</a>'
-    return msg, translated_title
+    return msg, translated_title, ok
 
 
 def main():
@@ -254,12 +267,18 @@ def main():
             if entry_dt and entry_dt < CUTOFF_DATE:
                 continue
 
-            message, raw_title = build_message(source_name, entry, entry_dt)
+            message, title, ok = build_message(source_name, entry, entry_dt)
+
+            # অনুবাদ ফেইল করলে পাঠানো হবে না, পরের রানে আবার চেষ্টা হবে
+            if not ok:
+                print(f"⚠️ অনুবাদ ফেইল, পরে আবার চেষ্টা হবে: {title[:40]}")
+                continue
+
             if send_telegram_message(message):
                 save_sent_post(post_id)
                 sent_posts.add(post_id)
                 new_posts_found += 1
-                print(f"✅ Posted: {raw_title[:40]}")
+                print(f"✅ Posted: {title[:40]}")
 
     if new_posts_found == 0:
         print("No new updates found.")
