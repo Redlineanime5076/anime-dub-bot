@@ -23,7 +23,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install requests feedparser deep-translator
+          pip install requests feedparser
 
       - name: Run Script
         env:
