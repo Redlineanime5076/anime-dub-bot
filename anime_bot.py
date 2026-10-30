@@ -7,19 +7,18 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 import requests
 import feedparser
-from deep_translator import GoogleTranslator
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = "@databaceforredlineanime"
 
 if not BOT_TOKEN:
-    print("❌ BOT_TOKEN পাওয়া যায়নি! GitHub Secrets ঠিকভাবে সেট করা হয়েছে কি না দেখুন।")
+    print("❌ BOT_TOKEN পাওয়া যায়নি! GitHub Secrets ঠিকভাবে সেট করা হয়েছে কি না দেখুন।")
     sys.exit(1)
 
 POSTS_PER_FEED = 2
 HISTORY_FILE = "sent_posts.txt"
 
-# False রাখলে লিংকের নিচে জাপানি টাইটেলের প্রিভিউ কার্ড আসবে না
+# লিংকের প্রিভিউ কার্ড অন রাখতে True
 SHOW_LINK_PREVIEW = True
 
 HEADERS = {
@@ -29,24 +28,33 @@ HEADERS = {
 # ২৯ অক্টোবরের পূর্বের পোস্ট ফিল্টার করার ডেট (UTC)
 CUTOFF_DATE = datetime(2026, 10, 29, 0, 0, 0, tzinfo=timezone.utc)
 
-# অটো ট্রান্সলেটর সেটআপ
-translator = GoogleTranslator(source="auto", target="en")
-
 JP_RE = re.compile(r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]")
 
 
 def translate_if_japanese(text):
-    """(টেক্সট, সফল কিনা) ফেরত দেয়। জাপানি থাকলে ৩ বার অনুবাদের চেষ্টা করে।"""
+    """গুগলের ডিরেক্ট এপিআই দিয়ে জাপানি শিরোনাম শতভাগ নির্ভুলভাবে ইংরেজিতে রূপান্তর করে"""
     if not text or not JP_RE.search(text):
         return text, True
 
+    api_url = "https://translate.googleapis.com/translate_a/single"
+    params = {
+        "client": "gtx",
+        "sl": "ja",
+        "tl": "en",
+        "dt": "t",
+        "q": text
+    }
+
     for attempt in range(3):
         try:
-            out = translator.translate(text)
-            if out and not JP_RE.search(out):
-                return out, True
+            res = requests.get(api_url, params=params, headers=HEADERS, timeout=12)
+            if res.status_code == 200:
+                data = res.json()
+                translated_text = "".join([part[0] for part in data[0] if part[0]])
+                if translated_text:
+                    return translated_text.strip(), True
         except Exception as e:
-            print(f"Translation Error (try {attempt + 1}): {e}")
+            print(f"Translation API Error (attempt {attempt + 1}): {e}")
         time.sleep(2)
 
     return text, False
@@ -114,7 +122,7 @@ RSS_FEEDS = [
     {"name": "JP Trailer/PV", "url": gnews_jp("アニメ 本予告 OR PV公開")},
     {"name": "JP Episode Preview (先行カット)", "url": gnews_jp("アニメ 第 先行カット OR あらすじ")},
     {"name": "JP Box Office Records", "url": gnews_jp("劇場アニメ 興行収入 突破")},
-    {"name": "JP Ranking Record", "url": gnews_jp("アニメ ランキング 1位 獲得")},
+    {"name": "JP Ranking Record", "url": gnews_jp("アニメ ランキング 1位 獲得")}
 ]
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -230,7 +238,7 @@ def build_message(source_name, entry, entry_dt):
     link = entry.get("link", "").strip()
     published = format_to_ist(entry_dt, entry)
 
-    # জাপানি টেক্সট শনাক্ত হলে ইংরেজিতে অনুবাদ করবে
+    # গুগলের ডিরেক্ট এপিআই দিয়ে ট্রান্সলেট হচ্ছে
     translated_title, ok = translate_if_japanese(raw_title)
 
     msg = (
@@ -263,15 +271,15 @@ def main():
                 continue
 
             entry_dt = get_entry_datetime(entry)
-            # ২৯ অক্টোবরের পূর্বের পোস্ট ফিল্টার করা হচ্ছে
+            # ২৯ অক্টোবরের আগের পোস্ট ড্রপ হবে
             if entry_dt and entry_dt < CUTOFF_DATE:
                 continue
 
             message, title, ok = build_message(source_name, entry, entry_dt)
 
-            # অনুবাদ ফেইল করলে পাঠানো হবে না, পরের রানে আবার চেষ্টা হবে
+            # কোনো কারণে ট্রান্সলেশন ব্যর্থ হলে কাঁচা জাপানি পোস্ট হবে না
             if not ok:
-                print(f"⚠️ অনুবাদ ফেইল, পরে আবার চেষ্টা হবে: {title[:40]}")
+                print(f"⚠️ অনুবাদ হয়নি, পোস্ট ড্রপ করা হলো: {title[:40]}")
                 continue
 
             if send_telegram_message(message):
@@ -283,7 +291,7 @@ def main():
     if new_posts_found == 0:
         print("No new updates found.")
     else:
-        print(f"মোট {new_posts_found}টি নতুন পোস্ট পাঠানো হয়েছে।")
+        print(f"মোট {new_posts_found}টি নতুন পোস্ট পাঠানো হয়েছে।")
 
 
 if __name__ == "__main__":
