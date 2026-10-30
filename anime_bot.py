@@ -2,15 +2,18 @@ import os
 import sys
 import time
 import html
+import re
 from datetime import datetime, timezone, timedelta
+from urllib.parse import quote
 import requests
 import feedparser
+from deep_translator import GoogleTranslator
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = "@databaceforredlineanime"
 
 if not BOT_TOKEN:
-    print("❌ BOT_TOKEN পাওয়া যায়নি! GitHub Secrets ঠিকভাবে সেট করা হয়েছে কি না দেখুন।")
+    print("❌ BOT_TOKEN পাওয়া যায়নি! GitHub Secrets ঠিকভাবে সেট করা হয়েছে কি না দেখুন।")
     sys.exit(1)
 
 POSTS_PER_FEED = 2
@@ -19,7 +22,24 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
-from urllib.parse import quote
+# ২৯ অক্টোবরের পূর্বের পোস্ট ফিল্টার করার ডেট (UTC)
+CUTOFF_DATE = datetime(2026, 10, 29, 0, 0, 0, tzinfo=timezone.utc)
+
+# অটো ট্রান্সলেটর সেটআপ
+translator = GoogleTranslator(source="auto", target="en")
+
+def translate_if_japanese(text):
+    """টেক্সটে জাপানি অক্ষর থাকলে তা ইংরেজিতে অনুবাদ করে"""
+    if not text:
+        return text
+    jp_pattern = re.compile(r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]")
+    if jp_pattern.search(text):
+        try:
+            return translator.translate(text)
+        except Exception as e:
+            print(f"Translation Error: {e}")
+            return text
+    return text
 
 def gnews(q, lang="en", country="US"):
     return f"https://news.google.com/rss/search?q={quote(q)}&hl={lang}-{country}&gl={country}&ceid={country}:{lang}"
@@ -42,7 +62,7 @@ RSS_FEEDS = [
     {"name": "The Fandom Post", "url": "https://www.fandompost.com/feed/"},
     {"name": "Anime Trending", "url": "https://anitrendz.com/news/feed"},
 
-    # জাপানি অফিশিয়াল মিডিয়া পোর্টাল
+    # জাপানি অফিশিয়াল মিডিয়া পোর্টাল
     {"name": "Comic Natalie (JP)", "url": "https://natalie.mu/comic/feed/news"},
 
     # মাঙ্গা ও লাইট নভেল অ্যাডাপ্টেশন
@@ -55,7 +75,7 @@ RSS_FEEDS = [
     {"name": "Anime Cast & Staff", "url": gnews('anime "cast" OR "staff" announced')},
     {"name": "Streaming Anime", "url": gnews('anime Netflix OR Crunchyroll OR "Prime Video" streaming')},
 
-    # কি-ভিজুয়াল, ট্রেলার ও টিজার
+    # কি-ভিজুয়াল, ট্রেলার ও টিজার
     {"name": "Visual & Teaser Updates", "url": gnews('anime "key visual" OR "teaser visual"')},
     {"name": "Anime Character Designs", "url": gnews('anime "character visual" OR "teaser trailer"')},
     {"name": "Anime Trailer Released", "url": gnews('anime "official trailer" OR "main trailer" released')},
@@ -70,7 +90,7 @@ RSS_FEEDS = [
     {"name": "Crunchyroll & Streaming Records", "url": gnews('anime Crunchyroll record OR viewership milestone')},
     {"name": "Anime Weekly Rankings", "url": gnews('anime ranking OR "anime of the week" OR "top anime"')},
 
-    # জাপানি ব্রেকিং নিউজ, ইলাস্ট্রেশন ও প্রিভিউ (সবার আগে খবর পাওয়ার জন্য)
+    # জাপানি ব্রেকিং নিউজ, ইলাস্ট্রেশন ও প্রিভিউ
     {"name": "JP Author Illustrations", "url": gnews_jp("描き下ろしイラスト アニメ")},
     {"name": "JP Author Congrats Art", "url": gnews_jp("原作者 お祝いイラスト アニメ")},
     {"name": "JP Anime Announcement", "url": gnews_jp("アニメ化決定")},
@@ -83,7 +103,6 @@ RSS_FEEDS = [
     {"name": "JP Box Office Records", "url": gnews_jp("劇場アニメ 興行収入 突破")},
     {"name": "JP Ranking Record", "url": gnews_jp("アニメ ランキング 1位 獲得")}
 ]
-
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
@@ -178,30 +197,38 @@ def fetch_feed(url):
         return feedparser.parse("")
 
 
-def format_to_ist(entry):
-    published_parsed = entry.get("published_parsed") or entry.get("updated_parsed")
-    if published_parsed:
-        utc_dt = datetime(*published_parsed[:6], tzinfo=timezone.utc)
+def get_entry_datetime(entry):
+    parsed = entry.get("published_parsed") or entry.get("updated_parsed")
+    if parsed:
+        return datetime(*parsed[:6], tzinfo=timezone.utc)
+    return None
+
+
+def format_to_ist(entry_dt, entry):
+    if entry_dt:
         ist_tz = timezone(timedelta(hours=5, minutes=30))
-        ist_dt = utc_dt.astimezone(ist_tz)
+        ist_dt = entry_dt.astimezone(ist_tz)
         return ist_dt.strftime("%d %b %Y, %I:%M %p IST")
     return (entry.get("published") or entry.get("updated") or "").strip()
 
 
-def build_message(source_name, entry):
+def build_message(source_name, entry, entry_dt):
     raw_title = entry.get("title", "Anime News Update").strip()
     link = entry.get("link", "").strip()
-    published = format_to_ist(entry)
+    published = format_to_ist(entry_dt, entry)
+
+    # জাপানি টেক্সট শনাক্ত হলে স্বয়ংক্রিয়ভাবে ইংরেজিতে অনুবাদ করবে
+    translated_title = translate_if_japanese(raw_title)
 
     msg = (
         f"🔥 <b>[{html.escape(source_name)}]</b>\n\n"
-        f"📢 <b>{html.escape(raw_title)}</b>\n\n"
+        f"📢 <b>{html.escape(translated_title)}</b>\n\n"
     )
     if published:
         msg += f"📅 <i>{html.escape(published)}</i>\n"
     if link:
         msg += f'🔗 <a href="{html.escape(link, quote=True)}">Read Full Article</a>'
-    return msg, raw_title
+    return msg, translated_title
 
 
 def main():
@@ -222,7 +249,12 @@ def main():
             if not post_id or post_id in sent_posts:
                 continue
 
-            message, raw_title = build_message(source_name, entry)
+            entry_dt = get_entry_datetime(entry)
+            # ২৯ অক্টোবরের পূর্বের পোস্ট ফিল্টার করা হচ্ছে
+            if entry_dt and entry_dt < CUTOFF_DATE:
+                continue
+
+            message, raw_title = build_message(source_name, entry, entry_dt)
             if send_telegram_message(message):
                 save_sent_post(post_id)
                 sent_posts.add(post_id)
