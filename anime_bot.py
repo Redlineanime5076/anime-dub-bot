@@ -19,26 +19,71 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
+from urllib.parse import quote
+
+def gnews(q, lang="en", country="US"):
+    return f"https://news.google.com/rss/search?q={quote(q)}&hl={lang}-{country}&gl={country}&ceid={country}:{lang}"
+
+def gnews_jp(q):
+    return f"https://news.google.com/rss/search?q={quote(q)}&hl=ja&gl=JP&ceid=JP:ja"
+
 RSS_FEEDS = [
-    # প্রধান অ্যানিমে নিউজ
+    # প্রধান গ্লোবাল অ্যানিমে নিউজ পোর্টাল
     {"name": "Anime News Network", "url": "https://www.animenewsnetwork.com/news/rss.xml"},
+    {"name": "ANN (All Content)", "url": "https://www.animenewsnetwork.com/all/rss.xml"},
     {"name": "MyAnimeList News", "url": "https://myanimelist.net/rss/news.xml"},
     {"name": "Crunchyroll News", "url": "https://cr-news-api-service.prd.crunchyrollsvc.com/v1/en-US/rss"},
     {"name": "Otaku USA Magazine", "url": "https://otakuusamagazine.com/feed/"},
     {"name": "Siliconera", "url": "https://www.siliconera.com/category/anime/feed/"},
     {"name": "Anime UK News", "url": "https://animeuknews.net/feed/"},
+    {"name": "Anime Corner", "url": "https://animecorner.me/feed/"},
+    {"name": "Honey's Anime", "url": "https://honeysanime.com/feed/"},
+    {"name": "Anime Herald", "url": "https://www.animeherald.com/feed/"},
+    {"name": "The Fandom Post", "url": "https://www.fandompost.com/feed/"},
+    {"name": "Anime Trending", "url": "https://anitrendz.com/news/feed"},
 
-    # কি-ভিজুয়াল, পোস্টার ও টিজার
-    {"name": "Visual & Teaser Updates", "url": "https://news.google.com/rss/search?q=anime+%22key+visual%22+OR+%22teaser+visual%22&hl=en-US&gl=US&ceid=US:en"},
-    {"name": "Anime Character Designs", "url": "https://news.google.com/rss/search?q=anime+%22character+visual%22+OR+%22teaser+trailer%22&hl=en-US&gl=US&ceid=US:en"},
+    # জাপানি অফিশিয়াল মিডিয়া পোর্টাল
+    {"name": "Comic Natalie (JP)", "url": "https://natalie.mu/comic/feed/news"},
 
-    # নতুন মাঙ্গা ও লাইট নভেল অ্যাডাপ্টেশন
-    {"name": "Manga Adaptation News", "url": "https://news.google.com/rss/search?q=%22manga+gets+anime%22+OR+%22gets+tv+anime%22&hl=en-US&gl=US&ceid=US:en"},
-    {"name": "Light Novel Adaptations", "url": "https://news.google.com/rss/search?q=%22light+novel+gets+anime%22+OR+%22anime+adaptation%22&hl=en-US&gl=US&ceid=US:en"},
+    # মাঙ্গা ও লাইট নভেল অ্যাডাপ্টেশন
+    {"name": "Manga Adaptation News", "url": gnews('"manga gets anime" OR "gets tv anime"')},
+    {"name": "Light Novel Adaptations", "url": gnews('"light novel gets anime" OR "anime adaptation"')},
 
-    # রিলিজ ডেট ও নতুন সিজন
-    {"name": "Anime Season Confirmations", "url": "https://news.google.com/rss/search?q=anime+%22release+date%22+OR+%22season+confirmed%22&hl=en-US&gl=US&ceid=US:en"}
+    # অ্যানিমে সিজন, মুভি, কাস্ট ও স্ট্রিমিং ঘোষণা
+    {"name": "Anime Season Confirmations", "url": gnews('anime "release date" OR "season confirmed"')},
+    {"name": "Anime Movie News", "url": gnews('anime film OR "anime movie" announced')},
+    {"name": "Anime Cast & Staff", "url": gnews('anime "cast" OR "staff" announced')},
+    {"name": "Streaming Anime", "url": gnews('anime Netflix OR Crunchyroll OR "Prime Video" streaming')},
+
+    # কি-ভিজুয়াল, ট্রেলার ও টিজার
+    {"name": "Visual & Teaser Updates", "url": gnews('anime "key visual" OR "teaser visual"')},
+    {"name": "Anime Character Designs", "url": gnews('anime "character visual" OR "teaser trailer"')},
+    {"name": "Anime Trailer Released", "url": gnews('anime "official trailer" OR "main trailer" released')},
+    {"name": "Anime PV/Teaser", "url": gnews('anime "promotional video" OR "teaser PV"')},
+
+    # এপিসোড প্রিভিউ, ইমেজ ও থিম সং (OP/ED)
+    {"name": "Anime Episode Preview", "url": gnews('anime "episode preview" OR "preview images"')},
+    {"name": "Anime Opening/Ending", "url": gnews('anime "opening theme" OR "ending theme" MV')},
+
+    # ভিউজ, বক্স অফিস, চার্ট ও র‍্যাংকিং রেকর্ড
+    {"name": "Anime Box Office Records", "url": gnews('anime "box office" record OR milestone')},
+    {"name": "Crunchyroll & Streaming Records", "url": gnews('anime Crunchyroll record OR viewership milestone')},
+    {"name": "Anime Weekly Rankings", "url": gnews('anime ranking OR "anime of the week" OR "top anime"')},
+
+    # জাপানি ব্রেকিং নিউজ, ইলাস্ট্রেশন ও প্রিভিউ (সবার আগে খবর পাওয়ার জন্য)
+    {"name": "JP Author Illustrations", "url": gnews_jp("描き下ろしイラスト アニメ")},
+    {"name": "JP Author Congrats Art", "url": gnews_jp("原作者 お祝いイラスト アニメ")},
+    {"name": "JP Anime Announcement", "url": gnews_jp("アニメ化決定")},
+    {"name": "JP New Visual", "url": gnews_jp("アニメ 新ビジュアル OR ティザービジュアル")},
+    {"name": "JP New Season", "url": gnews_jp("アニメ 第2期 OR 続編 制作決定")},
+    {"name": "JP Cast Staff", "url": gnews_jp("アニメ キャスト スタッフ 解禁")},
+    {"name": "JP Anime Movie", "url": gnews_jp("劇場アニメ 公開決定")},
+    {"name": "JP Trailer/PV", "url": gnews_jp("アニメ 本予告 OR PV公開")},
+    {"name": "JP Episode Preview (先行カット)", "url": gnews_jp("アニメ 第 先行カット OR あらすじ")},
+    {"name": "JP Box Office Records", "url": gnews_jp("劇場アニメ 興行収入 突破")},
+    {"name": "JP Ranking Record", "url": gnews_jp("アニメ ランキング 1位 獲得")}
 ]
+
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
