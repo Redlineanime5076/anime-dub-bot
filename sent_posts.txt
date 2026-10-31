@@ -277,3 +277,6 @@ anilist-199007-5
 anilist-203473-4
 https://crunchyroll.com/news/features/2026/10/31/best-anime-characters-trick-or-treat
 anilist-169581-6
+https://www.animenewsnetwork.com/cms/.243389
+https://www.animenewsnetwork.com/cms/.243388
+https://www.animenewsnetwork.com/cms/.242729
