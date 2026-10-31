@@ -5,6 +5,7 @@ import html
 import re
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
+from email.utils import parsedate_to_datetime
 import requests
 import feedparser
 
@@ -12,25 +13,25 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = "@databaceforredlineanime"
 
 if not BOT_TOKEN:
-    print("❌ BOT_TOKEN পাওয়া যায়নি! GitHub Secrets চেক করুন।")
+    print("Error: BOT_TOKEN not found in GitHub Secrets.")
     sys.exit(1)
 
 POSTS_PER_FEED = 3
+POSTS_PER_CR = 15
 HISTORY_FILE = "sent_posts.txt"
 SHOW_LINK_PREVIEW = True
+ANILIST_HOURS = 8
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
+    "Accept": "application/rss+xml, application/rdf+xml, application/atom+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.7"
 }
 
-# ২৯ অক্টোবরের পূর্বের পোস্ট ফিল্টার করার ডেট (UTC)
 CUTOFF_DATE = datetime(2026, 10, 29, 0, 0, 0, tzinfo=timezone.utc)
-
 JP_RE = re.compile(r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]")
 
 
 def translate_if_japanese(text):
-    """গুগলের ডিরেক্ট এপিআই দিয়ে জাপানি শিরোনাম ইংরেজিতে রূপান্তর করে"""
     if not text or not JP_RE.search(text):
         return text, True
 
@@ -67,10 +68,7 @@ def gnews_jp(q):
 
 
 RSS_FEEDS = [
-    # ক্রাঞ্চিরোল অফিসিয়াল রিলিজ ও নতুন ডাবিং ফিড
     {"name": "Crunchyroll Latest Releases", "url": "https://www.crunchyroll.com/rss/anime"},
-
-    # প্রধান গ্লোবাল অ্যানিমে নিউজ পোর্টাল
     {"name": "Anime News Network", "url": "https://www.animenewsnetwork.com/news/rss.xml"},
     {"name": "ANN (All Content)", "url": "https://www.animenewsnetwork.com/all/rss.xml"},
     {"name": "MyAnimeList News", "url": "https://myanimelist.net/rss/news.xml"},
@@ -83,36 +81,22 @@ RSS_FEEDS = [
     {"name": "Anime Herald", "url": "https://www.animeherald.com/feed/"},
     {"name": "The Fandom Post", "url": "https://www.fandompost.com/feed/"},
     {"name": "Anime Trending", "url": "https://anitrendz.com/news/feed"},
-
-    # জাপানি অফিশিয়াল মিডিয়া পোর্টাল
     {"name": "Comic Natalie (JP)", "url": "https://natalie.mu/comic/feed/news"},
-
-    # মাঙ্গা ও লাইট নভেল অ্যাডাপ্টেশন
     {"name": "Manga Adaptation News", "url": gnews('"manga gets anime" OR "gets tv anime"')},
     {"name": "Light Novel Adaptations", "url": gnews('"light novel gets anime" OR "anime adaptation"')},
-
-    # অ্যানিমে সিজন, মুভি, কাস্ট ও স্ট্রিমিং ঘোষণা
     {"name": "Anime Season Confirmations", "url": gnews('anime "release date" OR "season confirmed"')},
     {"name": "Anime Movie News", "url": gnews('anime film OR "anime movie" announced')},
     {"name": "Anime Cast & Staff", "url": gnews('anime "cast" OR "staff" announced')},
     {"name": "Streaming Anime", "url": gnews('anime Netflix OR Crunchyroll OR "Prime Video" streaming')},
-
-    # কি-ভিজুয়াল, ট্রেলার ও টিজার
     {"name": "Visual & Teaser Updates", "url": gnews('anime "key visual" OR "teaser visual"')},
     {"name": "Anime Character Designs", "url": gnews('anime "character visual" OR "teaser trailer"')},
     {"name": "Anime Trailer Released", "url": gnews('anime "official trailer" OR "main trailer" released')},
     {"name": "Anime PV/Teaser", "url": gnews('anime "promotional video" OR "teaser PV"')},
-
-    # এপিসোড প্রিভিউ, ইমেজ ও থিম সং (OP/ED)
     {"name": "Anime Episode Preview", "url": gnews('anime "episode preview" OR "preview images"')},
     {"name": "Anime Opening/Ending", "url": gnews('anime "opening theme" OR "ending theme" MV')},
-
-    # ভিউজ, বক্স অফিস, চার্ট ও র‍্যাংকিং রেকর্ড
     {"name": "Anime Box Office Records", "url": gnews('anime "box office" record OR milestone')},
     {"name": "Crunchyroll & Streaming Records", "url": gnews('anime Crunchyroll record OR viewership milestone')},
     {"name": "Anime Weekly Rankings", "url": gnews('anime ranking OR "anime of the week" OR "top anime"')},
-
-    # জাপানি ব্রেকিং নিউজ, ইলাস্ট্রেশন ও প্রিভিউ
     {"name": "JP Author Illustrations", "url": gnews_jp("描き下ろしイラスト アニメ")},
     {"name": "JP Author Congrats Art", "url": gnews_jp("原作者 お祝いイラスト アニメ")},
     {"name": "JP Anime Announcement", "url": gnews_jp("アニメ化決定")},
@@ -127,6 +111,68 @@ RSS_FEEDS = [
 ]
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+ANILIST_URL = "https://graphql.anilist.co"
+ANILIST_QUERY = """
+query ($from: Int, $to: Int, $page: Int) {
+  Page(page: $page, perPage: 50) {
+    pageInfo { hasNextPage }
+    airingSchedules(airingAt_greater: $from, airingAt_lesser: $to, sort: TIME) {
+      episode
+      airingAt
+      media {
+        id
+        title { romaji english }
+        externalLinks { site url }
+      }
+    }
+  }
+}
+"""
+
+
+def fetch_anilist_releases(hours=ANILIST_HOURS):
+    now = int(time.time())
+    time_from = now - hours * 3600
+    results = []
+
+    for page in range(1, 4):
+        try:
+            res = requests.post(
+                ANILIST_URL,
+                json={
+                    "query": ANILIST_QUERY,
+                    "variables": {"from": time_from, "to": now, "page": page},
+                },
+                headers=HEADERS,
+                timeout=15,
+            )
+            data = res.json().get("data", {}).get("Page", {})
+        except Exception as e:
+            print(f"AniList Error: {e}")
+            break
+
+        if not data or "airingSchedules" not in data:
+            break
+
+        for item in data["airingSchedules"]:
+            media = item["media"]
+            link = next(
+                (l["url"] for l in (media.get("externalLinks") or [])
+                 if l.get("site") == "Crunchyroll"),
+                None,
+            )
+            if not link:
+                continue
+            title = media["title"].get("english") or media["title"].get("romaji") or "Unknown"
+            post_id = f"anilist-{media['id']}-{item['episode']}"
+            results.append((post_id, title, item["episode"], item["airingAt"], link))
+
+        if not data.get("pageInfo", {}).get("hasNextPage"):
+            break
+        time.sleep(1)
+
+    return results
 
 
 def load_sent_posts():
@@ -145,19 +191,17 @@ def preflight_check():
     try:
         me = requests.get(f"{API}/getMe", timeout=15).json()
     except Exception as e:
-        print(f"❌ Network Error: {e}")
+        print(f"Network Error: {e}")
         return False
     if not me.get("ok"):
-        print(f"❌ Token Error: {me}")
+        print(f"Token Error: {me}")
         return False
     bot_id = me["result"]["id"]
-    print(f"✅ বট ঠিক আছে: @{me['result']['username']}")
 
     chat = requests.get(f"{API}/getChat", params={"chat_id": CHAT_ID}, timeout=15).json()
     if not chat.get("ok"):
-        print(f"❌ CHAT_ID সমস্যা: {chat}")
+        print(f"CHAT_ID Error: {chat}")
         return False
-    print(f"✅ চ্যানেল পাওয়া গেছে: {chat['result'].get('title')}")
 
     member = requests.get(
         f"{API}/getChatMember",
@@ -165,16 +209,15 @@ def preflight_check():
         timeout=15,
     ).json()
     if not member.get("ok"):
-        print(f"❌ Status Check Failed: {member}")
+        print(f"Status Check Failed: {member}")
         return False
     info = member["result"]
     if info.get("status") not in ("administrator", "creator"):
-        print("❌ বট চ্যানেলের অ্যাডমিন নয়। অ্যাডমিন বানান।")
+        print("Bot is not an admin in the channel.")
         return False
     if info.get("can_post_messages") is False:
-        print("❌ বটের 'Post Messages' পারমিশন নেই।")
+        print("Bot lacks 'Post Messages' permission.")
         return False
-    print("✅ বট অ্যাডমিন এবং পোস্ট করতে পারবে।")
     return True
 
 
@@ -190,7 +233,7 @@ def send_telegram_message(message):
             res = requests.post(f"{API}/sendMessage", json=payload, timeout=15)
             data = res.json()
         except Exception as e:
-            print(f"Network error: {e}")
+            print(f"Network Error: {e}")
             time.sleep(3)
             continue
 
@@ -200,7 +243,6 @@ def send_telegram_message(message):
 
         if data.get("error_code") == 429:
             wait = data.get("parameters", {}).get("retry_after", 10)
-            print(f"Rate limit, {wait} সেকেন্ড অপেক্ষা...")
             time.sleep(wait + 1)
             continue
 
@@ -223,6 +265,13 @@ def get_entry_datetime(entry):
     parsed = entry.get("published_parsed") or entry.get("updated_parsed")
     if parsed:
         return datetime(*parsed[:6], tzinfo=timezone.utc)
+    raw = entry.get("published") or entry.get("pubDate") or entry.get("updated")
+    if raw:
+        try:
+            dt = parsedate_to_datetime(raw)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            pass
     return None
 
 
@@ -231,29 +280,32 @@ def format_to_ist(entry_dt, entry):
         ist_tz = timezone(timedelta(hours=5, minutes=30))
         ist_dt = entry_dt.astimezone(ist_tz)
         return ist_dt.strftime("%d %b %Y, %I:%M %p IST")
-    return (entry.get("published") or entry.get("updated") or "").strip()
+    return (entry.get("published") or entry.get("pubDate") or "").strip()
 
 
 def parse_crunchyroll_details(title, desc=""):
-    """
-    ক্রাঞ্চিরোল টাইটেল ও ডেসক্রিপশন থেকে অ্যানিমের নাম, এপিসোড, অডিও ও সাবটাইটেল এক্সট্র্যাক্ট করে
-    """
     anime_name = title
     episode = "Latest Episode"
     audios = []
     subtitles = ["English"]
 
-    # ব্র্যাকেট থেকে অডিও/ডাব তথ্য বের করা (যেমন: (Hindi Dub), (Tamil Dub))
-    dub_match = re.search(r'\(([^)]+Dub|[^)]+Audio)\)', title, re.IGNORECASE)
-    if dub_match:
-        dub_info = dub_match.group(1).title()
-        audios.append(dub_info)
-        title_clean = re.sub(r'\(([^)]+Dub|[^)]+Audio)\)', '', title).strip()
-    else:
-        title_clean = title.strip()
-        audios.append("Japanese")
+    full_text = f"{title} {desc}"
 
-    # অ্যানিমের নাম ও এপিসোড আলাদা করা
+    dub_matches = re.findall(r'\b(Hindi|Tamil|Telugu|English|Spanish|Portuguese|German|French|Italian)\s+(?:Dub|Audio)\b', full_text, re.IGNORECASE)
+    if dub_matches:
+        for d in dub_matches:
+            d_fmt = f"{d.title()} Dub"
+            if d_fmt not in audios:
+                audios.append(d_fmt)
+    else:
+        b_match = re.search(r'\(([^)]+Dub|[^)]+Audio)\)', title, re.IGNORECASE)
+        if b_match:
+            audios.append(b_match.group(1).title())
+        else:
+            audios.append("Japanese")
+
+    title_clean = re.sub(r'\(([^)]+Dub|[^)]+Audio)\)', '', title).strip()
+
     if " - " in title_clean:
         parts = title_clean.split(" - ")
         anime_name = parts[0].strip()
@@ -265,10 +317,10 @@ def parse_crunchyroll_details(title, desc=""):
     else:
         anime_name = title_clean
 
-    # ডেসক্রিপশনে সাবটাইটেল ভাষা থাকলে যোগ করা
-    if re.search(r'bengali|bangla', desc, re.IGNORECASE):
-        subtitles.append("Bengali")
-    if re.search(r'hindi', desc, re.IGNORECASE) and "Hindi Dub" not in audios:
+    if re.search(r'\b(bengali|bangla)\b', full_text, re.IGNORECASE):
+        if "Bengali" not in subtitles:
+            subtitles.append("Bengali")
+    if re.search(r'\bhindi\b', full_text, re.IGNORECASE) and not any("Hindi" in a for a in audios):
         subtitles.append("Hindi")
 
     return anime_name, episode, ", ".join(audios), ", ".join(subtitles)
@@ -280,7 +332,6 @@ def build_message(source_name, entry, entry_dt):
     desc = entry.get("description", "")
     published = format_to_ist(entry_dt, entry)
 
-    # ক্রাঞ্চিরোল রিলিজের জন্য স্পেশাল স্ট্রিমিং অ্যালার্ট টেমপ্লেট
     if source_name == "Crunchyroll Latest Releases":
         anime_name, episode, audio, subs = parse_crunchyroll_details(raw_title, desc)
         msg = (
@@ -294,7 +345,6 @@ def build_message(source_name, entry, entry_dt):
         )
         return msg, f"{anime_name} - {episode}", True
 
-    # অন্যান্য সাধারণ অ্যানিমে নিউজ ও জাপানি খবরের জন্য
     translated_title, ok = translate_if_japanese(raw_title)
 
     msg = (
@@ -321,32 +371,57 @@ def main():
         if not feed.entries:
             continue
 
-        for entry in reversed(feed.entries[:POSTS_PER_FEED]):
+        limit = POSTS_PER_CR if source_name == "Crunchyroll Latest Releases" else POSTS_PER_FEED
+
+        for entry in reversed(feed.entries[:limit]):
             post_id = entry.get("id") or entry.get("link")
             if not post_id or post_id in sent_posts:
                 continue
 
             entry_dt = get_entry_datetime(entry)
-            # ২৯ অক্টোবরের আগের পোস্ট ফিল্টার
             if entry_dt and entry_dt < CUTOFF_DATE:
                 continue
 
             message, title, ok = build_message(source_name, entry, entry_dt)
 
             if not ok:
-                print(f"⚠️ অনুবাদ হয়নি, ড্রপ করা হলো: {title[:40]}")
+                print(f"Skipping untranslated post: {title[:40]}")
                 continue
 
             if send_telegram_message(message):
                 save_sent_post(post_id)
                 sent_posts.add(post_id)
                 new_posts_found += 1
-                print(f"✅ Posted: {title[:45]}")
+                print(f"Posted: {title[:45]}")
+
+    anilist_releases = fetch_anilist_releases()
+    for post_id, name, episode, air_ts, link in anilist_releases:
+        if post_id in sent_posts:
+            continue
+        air_dt = datetime.fromtimestamp(air_ts, tz=timezone.utc)
+        if air_dt < CUTOFF_DATE:
+            continue
+
+        published = format_to_ist(air_dt, {})
+        msg = (
+            "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
+            f"🎬 <b>Anime Name:</b> {html.escape(name)}\n"
+            f"🔢 <b>Episode:</b> Episode {episode}\n"
+            "🎙 <b>Audio Languages:</b> Japanese\n"
+            "📝 <b>Subtitles:</b> English\n"
+            f"📅 <b>Time:</b> <i>{html.escape(published)}</i>\n"
+            f"🔗 <b>Platform:</b> <a href=\"{html.escape(link, quote=True)}\">Crunchyroll</a>"
+        )
+        if send_telegram_message(msg):
+            save_sent_post(post_id)
+            sent_posts.add(post_id)
+            new_posts_found += 1
+            print(f"AniList Alert: {name} - Ep {episode}")
 
     if new_posts_found == 0:
         print("No new updates found.")
     else:
-        print(f"মোট {new_posts_found}টি নতুন পোস্ট পাঠানো হয়েছে।")
+        print(f"Total {new_posts_found} new posts sent.")
 
 
 if __name__ == "__main__":
