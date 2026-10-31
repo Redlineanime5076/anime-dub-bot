@@ -17,7 +17,7 @@ if not BOT_TOKEN:
     sys.exit(1)
 
 POSTS_PER_FEED = 3
-POSTS_PER_CR = 15
+POSTS_PER_CR = 25
 HISTORY_FILE = "sent_posts.txt"
 SHOW_LINK_PREVIEW = True
 ANILIST_HOURS = 8
@@ -285,43 +285,48 @@ def format_to_ist(entry_dt, entry):
 
 def parse_crunchyroll_details(title, desc=""):
     anime_name = title
-    episode = "Latest Episode"
+    episode = "Episode Update"
     audios = []
     subtitles = ["English"]
 
     full_text = f"{title} {desc}"
 
-    dub_matches = re.findall(r'\b(Hindi|Tamil|Telugu|English|Spanish|Portuguese|German|French|Italian)\s+(?:Dub|Audio)\b', full_text, re.IGNORECASE)
-    if dub_matches:
-        for d in dub_matches:
-            d_fmt = f"{d.title()} Dub"
-            if d_fmt not in audios:
-                audios.append(d_fmt)
-    else:
-        b_match = re.search(r'\(([^)]+Dub|[^)]+Audio)\)', title, re.IGNORECASE)
-        if b_match:
-            audios.append(b_match.group(1).title())
-        else:
-            audios.append("Japanese")
+    # হিন্দি, তামিল, তেলেগুসহ সকল আঞ্চলিক এবং আন্তর্জাতিক ডাব ফিল্টার
+    target_langs = ["Hindi", "Tamil", "Telugu", "English", "Japanese", "Spanish", "Portuguese", "German", "French", "Italian"]
+    for lang in target_langs:
+        pattern = rf'\b{lang}\b'
+        if re.search(pattern, full_text, re.IGNORECASE):
+            label = f"{lang.title()} Dub" if lang.lower() != "japanese" else "Japanese"
+            if label not in audios:
+                audios.append(label)
 
-    title_clean = re.sub(r'\(([^)]+Dub|[^)]+Audio)\)', '', title).strip()
+    # ব্র্যাকেট ফরম্যাট চেক (যেমন: (Hindi Dub), (Tamil Dub))
+    bracket_match = re.findall(r'\(([^)]+Dub|[^)]+Audio)\)', title, re.IGNORECASE)
+    for b in bracket_match:
+        b_clean = b.strip().title()
+        if b_clean not in audios:
+            audios.append(b_clean)
 
-    if " - " in title_clean:
-        parts = title_clean.split(" - ")
+    if not audios:
+        audios.append("Japanese")
+
+    # টাইটেল ও এপিসোড বিন্যাস
+    clean_title = re.sub(r'\(([^)]+Dub|[^)]+Audio|Hindi|Tamil|Telugu|English)\)', '', title, flags=re.IGNORECASE).strip()
+
+    if " - " in clean_title:
+        parts = clean_title.split(" - ")
         anime_name = parts[0].strip()
         episode = " - ".join(parts[1:]).strip()
-    elif " Episode " in title_clean:
-        parts = re.split(r'\s+(Episode\s+\d+)', title_clean, flags=re.IGNORECASE)
+    elif " Episode " in clean_title:
+        parts = re.split(r'\s+(Episode\s+\d+)', clean_title, flags=re.IGNORECASE)
         anime_name = parts[0].strip()
         episode = parts[1].strip() if len(parts) > 1 else "Episode"
     else:
-        anime_name = title_clean
+        anime_name = clean_title
 
     if re.search(r'\b(bengali|bangla)\b', full_text, re.IGNORECASE):
         if "Bengali" not in subtitles:
             subtitles.append("Bengali")
-    if re.search(r'\bhindi\b', full_text, re.IGNORECASE) and not any("Hindi" in a for a in audios):
-        subtitles.append("Hindi")
 
     return anime_name, episode, ", ".join(audios), ", ".join(subtitles)
 
@@ -374,7 +379,15 @@ def main():
         limit = POSTS_PER_CR if source_name == "Crunchyroll Latest Releases" else POSTS_PER_FEED
 
         for entry in reversed(feed.entries[:limit]):
-            post_id = entry.get("id") or entry.get("link")
+            raw_id = entry.get("id") or entry.get("link") or ""
+            raw_title = entry.get("title", "").strip()
+
+            # ডাব আপডেট এলে যাতে ড্রপ না হয়, তাই টাইটেলসহ আইডি তৈরি
+            if source_name == "Crunchyroll Latest Releases":
+                post_id = f"{raw_id}::{raw_title}"
+            else:
+                post_id = raw_id
+
             if not post_id or post_id in sent_posts:
                 continue
 
