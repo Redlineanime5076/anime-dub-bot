@@ -12,13 +12,11 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = "@databaceforredlineanime"
 
 if not BOT_TOKEN:
-    print("❌ BOT_TOKEN পাওয়া যায়নি! GitHub Secrets ঠিকভাবে সেট করা হয়েছে কি না দেখুন।")
+    print("❌ BOT_TOKEN পাওয়া যায়নি! GitHub Secrets চেক করুন।")
     sys.exit(1)
 
-POSTS_PER_FEED = 2
+POSTS_PER_FEED = 3
 HISTORY_FILE = "sent_posts.txt"
-
-# লিংকের প্রিভিউ কার্ড অন রাখতে True
 SHOW_LINK_PREVIEW = True
 
 HEADERS = {
@@ -32,7 +30,7 @@ JP_RE = re.compile(r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]")
 
 
 def translate_if_japanese(text):
-    """গুগলের ডিরেক্ট এপিআই দিয়ে জাপানি শিরোনাম শতভাগ নির্ভুলভাবে ইংরেজিতে রূপান্তর করে"""
+    """গুগলের ডিরেক্ট এপিআই দিয়ে জাপানি শিরোনাম ইংরেজিতে রূপান্তর করে"""
     if not text or not JP_RE.search(text):
         return text, True
 
@@ -69,6 +67,9 @@ def gnews_jp(q):
 
 
 RSS_FEEDS = [
+    # ক্রাঞ্চিরোল অফিসিয়াল রিলিজ ও নতুন ডাবিং ফিড
+    {"name": "Crunchyroll Latest Releases", "url": "https://www.crunchyroll.com/rss/anime"},
+
     # প্রধান গ্লোবাল অ্যানিমে নিউজ পোর্টাল
     {"name": "Anime News Network", "url": "https://www.animenewsnetwork.com/news/rss.xml"},
     {"name": "ANN (All Content)", "url": "https://www.animenewsnetwork.com/all/rss.xml"},
@@ -194,7 +195,7 @@ def send_telegram_message(message):
             continue
 
         if data.get("ok"):
-            time.sleep(3)
+            time.sleep(2.5)
             return True
 
         if data.get("error_code") == 429:
@@ -233,12 +234,67 @@ def format_to_ist(entry_dt, entry):
     return (entry.get("published") or entry.get("updated") or "").strip()
 
 
+def parse_crunchyroll_details(title, desc=""):
+    """
+    ক্রাঞ্চিরোল টাইটেল ও ডেসক্রিপশন থেকে অ্যানিমের নাম, এপিসোড, অডিও ও সাবটাইটেল এক্সট্র্যাক্ট করে
+    """
+    anime_name = title
+    episode = "Latest Episode"
+    audios = []
+    subtitles = ["English"]
+
+    # ব্র্যাকেট থেকে অডিও/ডাব তথ্য বের করা (যেমন: (Hindi Dub), (Tamil Dub))
+    dub_match = re.search(r'\(([^)]+Dub|[^)]+Audio)\)', title, re.IGNORECASE)
+    if dub_match:
+        dub_info = dub_match.group(1).title()
+        audios.append(dub_info)
+        title_clean = re.sub(r'\(([^)]+Dub|[^)]+Audio)\)', '', title).strip()
+    else:
+        title_clean = title.strip()
+        audios.append("Japanese")
+
+    # অ্যানিমের নাম ও এপিসোড আলাদা করা
+    if " - " in title_clean:
+        parts = title_clean.split(" - ")
+        anime_name = parts[0].strip()
+        episode = " - ".join(parts[1:]).strip()
+    elif " Episode " in title_clean:
+        parts = re.split(r'\s+(Episode\s+\d+)', title_clean, flags=re.IGNORECASE)
+        anime_name = parts[0].strip()
+        episode = parts[1].strip() if len(parts) > 1 else "Episode"
+    else:
+        anime_name = title_clean
+
+    # ডেসক্রিপশনে সাবটাইটেল ভাষা থাকলে যোগ করা
+    if re.search(r'bengali|bangla', desc, re.IGNORECASE):
+        subtitles.append("Bengali")
+    if re.search(r'hindi', desc, re.IGNORECASE) and "Hindi Dub" not in audios:
+        subtitles.append("Hindi")
+
+    return anime_name, episode, ", ".join(audios), ", ".join(subtitles)
+
+
 def build_message(source_name, entry, entry_dt):
     raw_title = entry.get("title", "Anime News Update").strip()
     link = entry.get("link", "").strip()
+    desc = entry.get("description", "")
     published = format_to_ist(entry_dt, entry)
 
-    # গুগলের ডিরেক্ট এপিআই দিয়ে ট্রান্সলেট হচ্ছে
+    # ক্রাঞ্চিরোল রিলিজের জন্য স্পেশাল স্ট্রিমিং অ্যালার্ট টেমপ্লেট
+    if source_name == "Crunchyroll Latest Releases":
+        anime_name, episode, audio, subs = parse_crunchyroll_details(raw_title, desc)
+        msg = (
+            "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
+            f"🎬 <b>Anime Name:</b> {html.escape(anime_name)}\n"
+            f"🔢 <b>Episode:</b> {html.escape(episode)}\n"
+            f"🎙 <b>Audio Languages:</b> {html.escape(audio)}\n"
+            f"📝 <b>Subtitles:</b> {html.escape(subs)}\n"
+            f"📅 <b>Time:</b> <i>{html.escape(published)}</i>\n"
+            f"🔗 <b>Platform:</b> <a href=\"{html.escape(link, quote=True)}\">Crunchyroll</a>"
+        )
+        return msg, f"{anime_name} - {episode}", True
+
+    # অন্যান্য সাধারণ অ্যানিমে নিউজ ও জাপানি খবরের জন্য
     translated_title, ok = translate_if_japanese(raw_title)
 
     msg = (
@@ -271,27 +327,26 @@ def main():
                 continue
 
             entry_dt = get_entry_datetime(entry)
-            # ২৯ অক্টোবরের আগের পোস্ট ড্রপ হবে
+            # ২৯ অক্টোবরের আগের পোস্ট ফিল্টার
             if entry_dt and entry_dt < CUTOFF_DATE:
                 continue
 
             message, title, ok = build_message(source_name, entry, entry_dt)
 
-            # কোনো কারণে ট্রান্সলেশন ব্যর্থ হলে কাঁচা জাপানি পোস্ট হবে না
             if not ok:
-                print(f"⚠️ অনুবাদ হয়নি, পোস্ট ড্রপ করা হলো: {title[:40]}")
+                print(f"⚠️ অনুবাদ হয়নি, ড্রপ করা হলো: {title[:40]}")
                 continue
 
             if send_telegram_message(message):
                 save_sent_post(post_id)
                 sent_posts.add(post_id)
                 new_posts_found += 1
-                print(f"✅ Posted: {title[:40]}")
+                print(f"✅ Posted: {title[:45]}")
 
     if new_posts_found == 0:
         print("No new updates found.")
     else:
-        print(f"মোট {new_posts_found}টি নতুন পোস্ট পাঠানো হয়েছে।")
+        print(f"মোট {new_posts_found}টি নতুন পোস্ট পাঠানো হয়েছে।")
 
 
 if __name__ == "__main__":
