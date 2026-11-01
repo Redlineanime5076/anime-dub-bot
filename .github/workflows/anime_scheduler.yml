@@ -23,7 +23,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install requests feedparser
+          pip install requests feedparser beautifulsoup4
 
       - name: Run Script
         env:
