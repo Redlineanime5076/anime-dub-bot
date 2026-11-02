@@ -23,7 +23,6 @@ HISTORY_FILE = "sent_posts.txt"
 SHOW_LINK_PREVIEW = True
 ANILIST_HOURS = 8
 
-# Global headers for all standard RSS feeds
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -82,9 +81,9 @@ RSS_FEEDS = [
     {"name": "Anime Corner", "url": "https://animecorner.me/feed/"},
     {"name": "Honey's Anime", "url": "https://honeysanime.com/feed/"},
     {"name": "Anime Herald", "url": "https://www.animeherald.com/feed/"},
-    {"name": "The Fandom Post", "url": "https://www.fandompost.com/feed/"},
-    {"name": "Anime Trending", "url": "https://anitrendz.com/news/feed"},
-    {"name": "Comic Natalie (JP)", "url": "https://natalie.mu/comic/feed/news"},
+    {"name": "The Fandom Post", "url": gnews("site:fandompost.com")},
+    {"name": "Anime Trending", "url": "https://anitrendz.net/news/feed/"},
+    {"name": "Comic Natalie (JP)", "url": gnews_jp("site:natalie.mu/comic")},
     {"name": "Manga Adaptation News", "url": gnews('"manga gets anime" OR "gets tv anime"')},
     {"name": "Light Novel Adaptations", "url": gnews('"light novel gets anime" OR "anime adaptation"')},
     {"name": "Anime Season Confirmations", "url": gnews('anime "release date" OR "season confirmed"')},
@@ -135,64 +134,78 @@ query ($from: Int, $to: Int, $page: Int) {
 
 
 def fetch_crunchyroll_calendar():
-    """Fetches the Crunchyroll release calendar with Indian locale headers and cookies."""
     results = []
     now = datetime.now(timezone.utc)
     date_strs = [(now - timedelta(days=1)).strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d")]
 
-    india_headers = {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
-        "Accept-Language": "en-IN,en;q=0.9,hi-IN;q=0.8,hi;q=0.7",
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Referer": "https://www.crunchyroll.com/releasecalendar",
-        "Cookie": "locale=en-IN; c_locale=en-IN;"
+        "Cookie": "locale=en-IN; c_locale=en-IN; audio_preference=hi-IN;"
     }
 
+    filters = ["hindi", "tamil", "telugu", "all"]
+
     for d_str in date_strs:
-        url = f"https://www.crunchyroll.com/simulcastcalendar?date={d_str}"
+        for flt in filters:
+            if flt == "all":
+                url = f"https://www.crunchyroll.com/simulcastcalendar?date={d_str}"
+            else:
+                url = f"https://www.crunchyroll.com/simulcastcalendar?date={d_str}&filter={flt}"
 
-        try:
-            res = requests.get(url, headers=india_headers, timeout=20)
-            if res.status_code != 200:
-                continue
-
-            soup = BeautifulSoup(res.text, "html.parser")
-            articles = soup.find_all("article", class_=re.compile(r"release"))
-
-            for art in articles:
-                title_elem = art.find(class_=re.compile(r"season-name|series-title"))
-                ep_elem = art.find(class_=re.compile(r"episode-name|episode-number"))
-                link_elem = art.find("a", href=True)
-
-                if not title_elem:
+            try:
+                res = requests.get(url, headers=headers, timeout=20)
+                if res.status_code != 200:
                     continue
 
-                raw_title = title_elem.get_text(strip=True)
-                raw_ep = ep_elem.get_text(strip=True) if ep_elem else "Episode Update"
-                link = link_elem["href"] if link_elem else "https://www.crunchyroll.com"
-                if not link.startswith("http"):
-                    link = f"https://www.crunchyroll.com{link}"
+                soup = BeautifulSoup(res.text, "html.parser")
+                articles = soup.find_all(["article", "div"], class_=re.compile(r"release|calendar-entry|day-schedule", re.IGNORECASE))
 
-                full_text = f"{raw_title} {raw_ep} {art.get_text()}"
-                audios = []
+                for art in articles:
+                    title_elem = art.find(class_=re.compile(r"season-name|series-title|title", re.IGNORECASE))
+                    ep_elem = art.find(class_=re.compile(r"episode-name|episode-number|sub-title", re.IGNORECASE))
+                    link_elem = art.find("a", href=True)
 
-                target_langs = ["Hindi", "Tamil", "Telugu", "English", "Japanese", "Spanish", "Portuguese", "German", "French", "Italian"]
-                for lang in target_langs:
-                    if re.search(rf'\b{lang}\b', full_text, re.IGNORECASE):
-                        label = f"{lang.title()} Dub" if lang.lower() != "japanese" else "Japanese"
-                        if label not in audios:
-                            audios.append(label)
+                    if not title_elem:
+                        continue
 
-                if not audios:
-                    audios.append("Japanese")
+                    raw_title = title_elem.get_text(strip=True)
+                    raw_ep = ep_elem.get_text(strip=True) if ep_elem else "Episode Update"
+                    link = link_elem["href"] if link_elem else "https://www.crunchyroll.com"
+                    if not link.startswith("http"):
+                        link = f"https://www.crunchyroll.com{link}"
 
-                post_id = f"cr-cal-{raw_title}-{raw_ep}-{'-'.join(audios)}"
-                results.append((post_id, raw_title, raw_ep, ", ".join(audios), link))
+                    card_text = art.get_text(separator=" ", strip=True)
+                    audios = []
 
-        except Exception as e:
-            print(f"Calendar Fetch Error: {e}")
+                    if flt in ["hindi", "tamil", "telugu"]:
+                        audios.append(f"{flt.title()} Dub")
 
-    return results
+                    for lang in ["Hindi", "Tamil", "Telugu", "English", "Japanese"]:
+                        if re.search(rf'\b{lang}\b', card_text, re.IGNORECASE):
+                            label = f"{lang.title()} Dub" if lang.lower() != "japanese" else "Japanese"
+                            if label not in audios:
+                                audios.append(label)
+
+                    if not audios:
+                        audios.append("Japanese")
+
+                    clean_title = re.sub(r'\(([^)]+Dub|[^)]+Audio|Hindi|Tamil|Telugu|English)\)', '', raw_title, flags=re.IGNORECASE).strip()
+                    post_id = f"cr-cal-{clean_title}-{raw_ep}-{'-'.join(audios)}"
+                    results.append((post_id, clean_title, raw_ep, ", ".join(audios), link))
+
+            except Exception as e:
+                print(f"Calendar Fetch Error ({flt}): {e}")
+
+    unique_results = []
+    seen_ids = set()
+    for item in results:
+        if item[0] not in seen_ids:
+            seen_ids.add(item[0])
+            unique_results.append(item)
+
+    return unique_results
 
 
 def fetch_anilist_releases(hours=ANILIST_HOURS):
@@ -432,7 +445,7 @@ def main():
     sent_posts = load_sent_posts()
     new_posts_found = 0
 
-    # 1. Crunchyroll Indian Release Calendar Scraping
+    # 1. Crunchyroll Indian Filter Calendar Scraping
     cal_releases = fetch_crunchyroll_calendar()
     for post_id, name, episode, audio, link in cal_releases:
         if post_id in sent_posts:
@@ -455,7 +468,7 @@ def main():
             new_posts_found += 1
             print(f"Posted Calendar Release: {name} - {episode} ({audio})")
 
-    # 2. Standard Global RSS Feeds
+    # 2. Global News Feeds
     for feed_info in RSS_FEEDS:
         source_name = feed_info["name"]
         feed = fetch_feed(feed_info["url"])
