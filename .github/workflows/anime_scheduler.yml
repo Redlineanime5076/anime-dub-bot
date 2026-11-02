@@ -5,14 +5,9 @@ on:
     - cron: '*/5 * * * *'
   workflow_dispatch:
 
-concurrency:
-  group: anime-bot
-  cancel-in-progress: false
-
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
 
     permissions:
       contents: write
@@ -40,12 +35,6 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          touch sent_posts.txt
-          git add sent_posts.txt
-          if git diff --staged --quiet; then
-            echo "No history changes."
-            exit 0
-          fi
-          git commit -m "Auto update sent anime history"
-          git pull --rebase origin ${{ github.ref_name }} || true
+          git add sent_posts.txt || true
+          git commit -m "Auto update sent anime history" || exit 0
           git push
