@@ -8,11 +8,9 @@ from urllib.parse import quote
 from email.utils import parsedate_to_datetime
 import requests
 import feedparser
-from bs4 import BeautifulSoup
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = "@databaceforredlineanime"
-PROXY_URL = os.getenv("PROXY_URL")  # ঐচ্ছিক: শুধু Crunchyroll এর জন্য
 
 if not BOT_TOKEN:
     print("Error: BOT_TOKEN not found in GitHub Secrets.")
@@ -23,7 +21,7 @@ ONLY_HINDI = True          # Crunchyroll STREAMING_ALERT শুধু Hindi Dub 
 POSTS_PER_FEED = 3
 POSTS_PER_CR = 25
 MAX_POSTS_PER_RUN = 30     # এক রানে সর্বোচ্চ এতগুলো পোস্ট
-MAX_AGE_HOURS = 48         # এর চেয়ে পুরোনো পোস্ট যাবে না
+MAX_AGE_HOURS = 48         # নিউজ ফিডের এর চেয়ে পুরোনো পোস্ট যাবে না
 HISTORY_FILE = "sent_posts.txt"
 SHOW_LINK_PREVIEW = True
 
@@ -32,16 +30,15 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.5",
 }
-CR_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-IN,en;q=0.9",
-    "Referer": "https://www.crunchyroll.com/releasecalendar",
-}
-PROXIES = {"http": PROXY_URL, "https": PROXY_URL} if PROXY_URL else None
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
 
 JP_RE = re.compile(r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]")
-HINDI_RE = re.compile(r"\bHindi\b(?:\s*\([^)]*\))?\s*(?:Dub|Audio)\b|\(\s*Hindi\s*\)", re.IGNORECASE)
+HINDI_RE = re.compile(
+    r"\bHindi\b(?:\s*\([^)]*\))?\s*(?:Dub|Audio)\b|\(\s*Hindi\s*\)", re.IGNORECASE
+)
 TITLE_CLEAN_RE = re.compile(
     r"\s*\([^)]*\b(?:Dub|Audio)\b[^)]*\)|\s*\(\s*Hindi\s*\)", re.IGNORECASE
 )
@@ -119,7 +116,6 @@ RSS_FEEDS = [
     {"name": "Honey's Anime", "url": "https://honeysanime.com/feed/"},
     {"name": "Anime Herald", "url": "https://www.animeherald.com/feed/"},
     {"name": "The Fandom Post", "url": gnews("site:fandompost.com")},
-    {"name": "Anime Trending", "url": "https://anitrendz.net/news/feed/"},
     {"name": "Comic Natalie (JP)", "url": gnews_jp("site:natalie.mu/comic")},
     {"name": "Manga Adaptation News", "url": gnews('"manga gets anime" OR "gets tv anime"')},
     {"name": "Light Novel Adaptations", "url": gnews('"light novel gets anime" OR "anime adaptation"')},
@@ -268,48 +264,85 @@ def format_to_ist(dt, entry=None):
 
 
 def fetch_crunchyroll_hindi_calendar():
-    """ক্যালেন্ডার থেকে শুধু Hindi Dub এন্ট্রি আনে।"""
+    """আসল ব্রাউজারে ক্যালেন্ডার খুলে Hindi Dub এন্ট্রি আনে।"""
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as e:
+        print(f"Playwright not installed: {e}")
+        return []
+
     results = []
     now = datetime.now(timezone.utc)
-    urls = []
-    for d in [now - timedelta(days=1), now]:
-        ds = d.strftime("%Y-%m-%d")
-        urls.append(f"https://www.crunchyroll.com/simulcastcalendar?date={ds}")
-        urls.append(f"https://www.crunchyroll.com/releasecalendar?date={ds}")
+    urls = [
+        f"https://www.crunchyroll.com/releasecalendar?date={now.strftime('%Y-%m-%d')}",
+        f"https://www.crunchyroll.com/releasecalendar?date={(now - timedelta(days=7)).strftime('%Y-%m-%d')}",
+    ]
 
-    for url in urls:
-        try:
-            res = requests.get(url, headers=CR_HEADERS, timeout=20, proxies=PROXIES)
-        except Exception as e:
-            print(f"Calendar request error: {e}")
-            continue
+    js_extract = """
+    els => els.map(e => {
+        const card = e.closest('article') || e.closest('li') || e.parentElement;
+        return {
+            href: e.href,
+            text: ((e.innerText || '') + ' ' + (e.getAttribute('title') || '') + ' ' +
+                   (e.getAttribute('aria-label') || '')).trim(),
+            card: card ? (card.innerText || '') : ''
+        };
+    })
+    """
 
-        page_hindi = len(re.findall(r"hindi", res.text, flags=re.IGNORECASE))
-        print(f"Calendar {url} -> HTTP {res.status_code}, size={len(res.text)}, 'hindi' mentions={page_hindi}")
-        if res.status_code != 200:
-            continue
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            ctx = browser.new_context(
+                locale="en-IN",
+                user_agent=BROWSER_UA,
+                viewport={"width": 1400, "height": 2200},
+            )
+            page = ctx.new_page()
 
-        soup = BeautifulSoup(res.text, "html.parser")
-        articles = soup.find_all("article")
-        print(f"  articles found: {len(articles)}")
+            for url in urls:
+                try:
+                    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                    page.wait_for_timeout(9000)
+                    page.mouse.wheel(0, 4000)       # lazy-load এর জন্য স্ক্রল
+                    page.wait_for_timeout(3000)
+                except Exception as e:
+                    print(f"Calendar load error: {e}")
+                    continue
 
-        for art in articles:
-            card_text = art.get_text(" ", strip=True)
-            if not is_hindi(card_text):
-                continue
+                items = page.eval_on_selector_all(
+                    "a[href*='/watch/'], a[href*='/series/']", js_extract
+                )
+                body_text = ""
+                try:
+                    body_text = page.inner_text("body")
+                except Exception:
+                    pass
 
-            t = art.find(class_=re.compile(r"season-name|series-title|title", re.IGNORECASE))
-            e = art.find(class_=re.compile(r"episode-name|episode-number|sub-title", re.IGNORECASE))
-            a = art.find("a", href=True)
+                hindi_items = [i for i in items if is_hindi(i["text"]) or is_hindi(i["card"])]
+                print(f"Calendar {url}")
+                print(f"  links={len(items)}, hindi_items={len(hindi_items)}, "
+                      f"'hindi' in page={len(re.findall('hindi', body_text, re.I))}")
+                for s in items[:4]:
+                    print("  sample:", s["text"][:90].replace("\n", " | "))
+                for m in list(re.finditer("hindi", body_text, re.I))[:3]:
+                    ctx_txt = body_text[max(0, m.start() - 50): m.end() + 50]
+                    print("  hindi-context:", ctx_txt.replace("\n", " | "))
 
-            raw_title = t.get_text(strip=True) if t else card_text[:80]
-            raw_ep = e.get_text(strip=True) if e else "Episode Update"
-            link = a["href"] if a else "https://www.crunchyroll.com"
-            if not link.startswith("http"):
-                link = f"https://www.crunchyroll.com{link}"
+                for i in hindi_items:
+                    src = i["text"] if is_hindi(i["text"]) else i["card"]
+                    lines = [l.strip() for l in src.split("\n") if l.strip()]
+                    raw_title = next((l for l in lines if is_hindi(l)), lines[0] if lines else "")
+                    ep_match = re.search(r"(?:\bE|Episode\s*)(\d+)", src, re.IGNORECASE)
+                    raw_ep = f"Episode {ep_match.group(1)}" if ep_match else "Episode Update"
+                    name = TITLE_CLEAN_RE.sub("", raw_title).strip()
+                    if not name:
+                        continue
+                    results.append((hindi_key(name, raw_ep), name, raw_ep, i["href"]))
 
-            name = TITLE_CLEAN_RE.sub("", raw_title).strip()
-            results.append((hindi_key(name, raw_ep), name, raw_ep, link))
+            browser.close()
+    except Exception as e:
+        print(f"Playwright error: {e}")
 
     seen, unique = set(), []
     for item in results:
@@ -361,7 +394,7 @@ def main():
     def limit_reached():
         return new_count >= MAX_POSTS_PER_RUN
 
-    # 1. Crunchyroll Calendar (Hindi Dub)
+    # 1. Crunchyroll Calendar (Hindi Dub) - আসল ব্রাউজার দিয়ে
     for key, name, episode, link in fetch_crunchyroll_hindi_calendar():
         if limit_reached():
             break
