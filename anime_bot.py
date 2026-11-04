@@ -4,6 +4,7 @@ import time
 import html
 import re
 import json
+from io import BytesIO
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote, urljoin
 from email.utils import parsedate_to_datetime
@@ -23,16 +24,17 @@ POSTS_PER_CR = 25
 HISTORY_FILE = "sent_posts.txt"
 ANILIST_HOURS = 8
 
-DEFAULT_IMAGE_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/0/08/Crunchyroll_Logo.png/600px-Crunchyroll_Logo.png"
+# নির্ভরযোগ্য ডিফল্ট ব্যানার ইমেজ (Imgur CDN)
+DEFAULT_IMAGE_URL = "https://i.imgur.com/xdr9fNn.png"
 
-# সম্পূর্ণ বোল্ড করা ফুটার
+# সম্পূর্ণ বোল্ড করা চ্যানেল ফুটার
 CHANNEL_FOOTER = """
 <b>━━━━━━━━━━━━━━━━━━━━━━━━</b>
 📢 <b>Channel: @RedLineAnime</b>
 💬 <b>Don't miss any update, share with your friends!</b>"""
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.5"
 }
@@ -83,6 +85,7 @@ def gnews_jp(q):
     return f"https://news.google.com/rss/search?q={quote(q)}&hl=ja&gl=JP&ceid=JP:ja"
 
 
+# সঠিক ইউটিউব চ্যানেল আইডি সহ আরএসএস ফিডস
 RSS_FEEDS = [
     # Official YouTube Streaming Channels
     {"name": "Ani-One India", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCv0r_aXN3Xz0IeBnrq_K7Lw"},
@@ -355,28 +358,31 @@ def preflight_check():
 
 
 def send_telegram_message(message, image_url=""):
+    """ছবি পাইথনের মেমরিতে ডাউনলোড করে সরাসরি আপলোড করে, যাতে টেলিগ্রাম ব্লকেজ না হয়"""
     target_image = image_url if image_url else DEFAULT_IMAGE_URL
 
     if target_image:
-        payload = {
-            "chat_id": CHAT_ID,
-            "photo": target_image,
-            "caption": message[:1024],
-            "parse_mode": "HTML",
-        }
-        for attempt in range(3):
-            try:
-                res = requests.post(f"{API}/sendPhoto", json=payload, timeout=20)
-                data = res.json()
-                if data.get("ok"):
+        try:
+            # পাইথন সরাসরি ইমেজ ডাউনলোড করে নিচ্ছে
+            img_res = requests.get(target_image, headers=HEADERS, timeout=12)
+            if img_res.status_code == 200 and len(img_res.content) > 1000:
+                img_data = BytesIO(img_res.content)
+                files = {"photo": ("image.jpg", img_data, "image/jpeg")}
+                data = {
+                    "chat_id": CHAT_ID,
+                    "caption": message[:1024],
+                    "parse_mode": "HTML"
+                }
+                res = requests.post(f"{API}/sendPhoto", data=data, files=files, timeout=25)
+                if res.json().get("ok"):
                     time.sleep(2.5)
                     return True
                 else:
-                    print(f"Photo send error: {data.get('description')}")
-            except Exception as e:
-                print(f"Exception sending photo: {e}")
-                time.sleep(3)
+                    print(f"Photo send error: {res.json().get('description')}")
+        except Exception as e:
+            print(f"Exception downloading/uploading photo: {e}")
 
+    # ছবি না পাওয়া গেলে বা ফেইল করলে টেক্সট মেসেজ
     payload = {
         "chat_id": CHAT_ID,
         "text": message[:4096],
@@ -489,7 +495,7 @@ def build_message(source_name, entry, entry_dt):
     elif "enclosures" in entry and entry["enclosures"]:
         image_url = entry["enclosures"][0].get("href", "")
 
-    # 1. Crunchyroll Releases (সম্পূর্ণ বোল্ড)
+    # 1. Crunchyroll Releases
     if source_name == "Crunchyroll Latest Releases":
         anime_name, episode, audio, subs = extract_media_details(raw_title, desc)
         msg = (
@@ -504,7 +510,7 @@ def build_message(source_name, entry, entry_dt):
         )
         return msg, f"{anime_name} - {episode}", image_url, True
 
-    # 2. Ani-One, Muse & Crunchyroll India YouTube (সম্পূর্ণ বোল্ড)
+    # 2. Ani-One, Muse & Crunchyroll India YouTube
     if any(k in source_name for k in ["Ani-One", "Muse", "YouTube"]):
         anime_name, episode, audio, subs = extract_media_details(raw_title, desc)
         platform_name = source_name.replace(" Releases", "")
@@ -520,7 +526,7 @@ def build_message(source_name, entry, entry_dt):
         )
         return msg, f"{anime_name} - {episode}", image_url, True
 
-    # 3. OTT Streaming Alerts (সম্পূর্ণ বোল্ড)
+    # 3. OTT Streaming Alerts
     if "Alert" in source_name:
         platform_name = source_name.replace(" Anime Alert", "").strip()
         anime_name, episode, audio, subs = extract_media_details(raw_title, desc)
@@ -535,7 +541,7 @@ def build_message(source_name, entry, entry_dt):
         )
         return msg, anime_name, image_url, True
 
-    # 4. News Articles (সম্পূর্ণ বোল্ড)
+    # 4. News Articles
     translated_title, ok = translate_if_japanese(raw_title)
 
     msg = (
@@ -562,7 +568,7 @@ def main():
     sent_posts = load_sent_posts()
     new_posts_found = 0
 
-    # 1. YouTube Community Posts (সম্পূর্ণ বোল্ড)
+    # 1. YouTube Community Posts
     for ch in COMMUNITY_CHANNELS:
         posts = fetch_youtube_community_posts(ch["name"], ch["handle"])
         for p in posts:
@@ -622,7 +628,7 @@ def main():
                 new_posts_found += 1
                 print(f"Posted: {title[:45]}")
 
-    # 3. AniList Broadcast Schedule Backup (সম্পূর্ণ বোল্ড)
+    # 3. AniList Broadcast Schedule Backup
     anilist_releases = fetch_anilist_releases()
     for post_id, name, episode, air_ts, link, image_url in anilist_releases:
         if post_id in sent_posts:
