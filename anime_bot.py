@@ -4,7 +4,7 @@ import time
 import html
 import re
 from datetime import datetime, timezone, timedelta
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urljoin
 from email.utils import parsedate_to_datetime
 import requests
 import feedparser
@@ -20,7 +20,6 @@ if not BOT_TOKEN:
 POSTS_PER_FEED = 3
 POSTS_PER_CR = 25
 HISTORY_FILE = "sent_posts.txt"
-SHOW_LINK_PREVIEW = True
 ANILIST_HOURS = 8
 
 HEADERS = {
@@ -70,15 +69,16 @@ def gnews_jp(q):
 
 
 RSS_FEEDS = [
-    # Crunchyroll
-    {"name": "Crunchyroll Latest Releases", "url": "https://www.crunchyroll.com/rss/anime"},
-    {"name": "Crunchyroll News", "url": "https://cr-news-api-service.prd.crunchyrollsvc.com/v1/en-US/rss"},
-
     # Official YouTube Streaming Channels (India & Asia)
     {"name": "Ani-One India", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCv0r_aXN3Xz0IeBnrq_K7Lw"},
     {"name": "Ani-One Asia", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC0wNSTMWIL3qaorLx0jie6A"},
     {"name": "Muse India", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC5_TXXi1a_mK_YJm6y5U6_w"},
     {"name": "Muse Asia", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCGbsPEJY7rB87Uv3_uB_pCw"},
+    {"name": "Crunchyroll India YouTube", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC1dpwMXjjPe87utZQRrEr3Q"},
+
+    # Crunchyroll Official RSS & News
+    {"name": "Crunchyroll Latest Releases", "url": "https://www.crunchyroll.com/rss/anime"},
+    {"name": "Crunchyroll News", "url": "https://cr-news-api-service.prd.crunchyrollsvc.com/v1/en-US/rss"},
 
     # OTT Anime Streaming Alerts (India)
     {"name": "Netflix Anime Alert", "url": gnews('anime ("Netflix" OR "Netflix India") (streaming OR release OR added OR episodes)')},
@@ -127,7 +127,7 @@ RSS_FEEDS = [
     {"name": "JP Author Congrats Art", "url": gnews_jp("原作者 お祝いイラスト アニメ")},
     {"name": "JP Anime Announcement", "url": gnews_jp("アニメ化決定")},
     {"name": "JP New Visual", "url": gnews_jp("アニメ 新ビジュアル OR ティザービジュアル")},
-    {"name": "JP New Season", "url": gnews_jp("アニメ 第2期 OR 続編 制作決定")},
+    {"name": "JP New Season", "url": gnews_jp("アニメ 第2期 OR 続編 制作决定")},
     {"name": "JP Cast Staff", "url": gnews_jp("アニメ キャスト スタッフ 解禁")},
     {"name": "JP Anime Movie", "url": gnews_jp("劇場アニメ 公開決定")},
     {"name": "JP Trailer/PV", "url": gnews_jp("アニメ 本予告 OR PV公開")},
@@ -149,6 +149,7 @@ query ($from: Int, $to: Int, $page: Int) {
       media {
         id
         title { romaji english }
+        coverImage { extraLarge large }
         externalLinks { site url }
       }
     }
@@ -157,79 +158,30 @@ query ($from: Int, $to: Int, $page: Int) {
 """
 
 
-def fetch_crunchyroll_calendar():
-    results = []
-    now = datetime.now(timezone.utc)
-    date_strs = [(now - timedelta(days=1)).strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d")]
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Referer": "https://www.crunchyroll.com/releasecalendar",
-        "Cookie": "locale=en-IN; c_locale=en-IN; audio_preference=hi-IN;"
-    }
-
-    filters = ["hindi", "tamil", "telugu", "all"]
-
-    for d_str in date_strs:
-        for flt in filters:
-            if flt == "all":
-                url = f"https://www.crunchyroll.com/simulcastcalendar?date={d_str}"
-            else:
-                url = f"https://www.crunchyroll.com/simulcastcalendar?date={d_str}&filter={flt}"
-
-            try:
-                res = requests.get(url, headers=headers, timeout=20)
-                if res.status_code != 200:
-                    continue
-
-                soup = BeautifulSoup(res.text, "html.parser")
-                articles = soup.find_all(["article", "div"], class_=re.compile(r"release|calendar-entry|day-schedule", re.IGNORECASE))
-
-                for art in articles:
-                    title_elem = art.find(class_=re.compile(r"season-name|series-title|title", re.IGNORECASE))
-                    ep_elem = art.find(class_=re.compile(r"episode-name|episode-number|sub-title", re.IGNORECASE))
-                    link_elem = art.find("a", href=True)
-
-                    if not title_elem:
-                        continue
-
-                    raw_title = title_elem.get_text(strip=True)
-                    raw_ep = ep_elem.get_text(strip=True) if ep_elem else "Episode Update"
-                    link = link_elem["href"] if link_elem else "https://www.crunchyroll.com"
-                    if not link.startswith("http"):
-                        link = f"https://www.crunchyroll.com{link}"
-
-                    card_text = art.get_text(separator=" ", strip=True)
-                    audios = []
-
-                    if flt in ["hindi", "tamil", "telugu"]:
-                        audios.append(f"{flt.title()} Dub")
-
-                    for lang in ["Hindi", "Tamil", "Telugu", "English", "Japanese"]:
-                        if re.search(rf'\b{lang}\b', card_text, re.IGNORECASE):
-                            label = f"{lang.title()} Dub" if lang.lower() != "japanese" else "Japanese"
-                            if label not in audios:
-                                audios.append(label)
-
-                    if not audios:
-                        audios.append("Japanese")
-
-                    clean_title = re.sub(r'\(([^)]+Dub|[^)]+Audio|Hindi|Tamil|Telugu|English)\)', '', raw_title, flags=re.IGNORECASE).strip()
-                    post_id = f"cr-cal-{clean_title}-{raw_ep}-{'-'.join(audios)}"
-                    results.append((post_id, clean_title, raw_ep, ", ".join(audios), link))
-
-            except Exception as e:
-                print(f"Calendar Fetch Error ({flt}): {e}")
-
-    unique_results = []
-    seen_ids = set()
-    for item in results:
-        if item[0] not in seen_ids:
-            seen_ids.add(item[0])
-            unique_results.append(item)
-
-    return unique_results
+def extract_og_image(article_url):
+    """আর্টিকেল পেজ থেকে og:image বা twitter:image থাম্বনেইল বের করে"""
+    if not article_url or not article_url.startswith("http"):
+        return ""
+    try:
+        res = requests.get(article_url, headers=HEADERS, timeout=10)
+        if res.status_code != 200 or "html" not in res.headers.get("Content-Type", "").lower():
+            return ""
+        soup = BeautifulSoup(res.text, "html.parser")
+        
+        meta_tags = [
+            {"property": "og:image"},
+            {"property": "og:image:secure_url"},
+            {"name": "twitter:image"},
+            {"name": "twitter:image:src"}
+        ]
+        for tag in meta_tags:
+            elem = soup.find("meta", attrs=tag)
+            if elem and elem.get("content"):
+                img = elem["content"].strip()
+                return urljoin(article_url, img)
+    except Exception:
+        pass
+    return ""
 
 
 def fetch_anilist_releases(hours=ANILIST_HOURS):
@@ -266,8 +218,9 @@ def fetch_anilist_releases(hours=ANILIST_HOURS):
             if not link:
                 continue
             title = media["title"].get("english") or media["title"].get("romaji") or "Unknown"
+            image = media.get("coverImage", {}).get("extraLarge") or media.get("coverImage", {}).get("large") or ""
             post_id = f"anilist-{media['id']}-{item['episode']}"
-            results.append((post_id, title, item["episode"], item["airingAt"], link))
+            results.append((post_id, title, item["episode"], item["airingAt"], link, image))
 
         if not data.get("pageInfo", {}).get("hasNextPage"):
             break
@@ -322,34 +275,46 @@ def preflight_check():
     return True
 
 
-def send_telegram_message(message):
+def send_telegram_message(message, image_url=""):
+    """ছবি থাকলে ক্যাপশনসহ ফটো পাঠায়, অন্যথায় টেক্সট মেসেজ পাঠায়"""
+    if image_url:
+        payload = {
+            "chat_id": CHAT_ID,
+            "photo": image_url,
+            "caption": message,
+            "parse_mode": "HTML",
+        }
+        for attempt in range(3):
+            try:
+                res = requests.post(f"{API}/sendPhoto", json=payload, timeout=20)
+                data = res.json()
+                if data.get("ok"):
+                    time.sleep(2.5)
+                    return True
+            except Exception:
+                time.sleep(3)
+
+    # ছবি না থাকলে বা ছবি পাঠাতে ব্যর্থ হলে সাধারণ টেক্সট মেসেজ
     payload = {
         "chat_id": CHAT_ID,
         "text": message,
         "parse_mode": "HTML",
-        "disable_web_page_preview": not SHOW_LINK_PREVIEW,
+        "disable_web_page_preview": False,
     }
     for attempt in range(3):
         try:
             res = requests.post(f"{API}/sendMessage", json=payload, timeout=15)
             data = res.json()
-        except Exception as e:
-            print(f"Network Error: {e}")
+            if data.get("ok"):
+                time.sleep(2.5)
+                return True
+            if data.get("error_code") == 429:
+                wait = data.get("parameters", {}).get("retry_after", 10)
+                time.sleep(wait + 1)
+                continue
+            return False
+        except Exception:
             time.sleep(3)
-            continue
-
-        if data.get("ok"):
-            time.sleep(2.5)
-            return True
-
-        if data.get("error_code") == 429:
-            wait = data.get("parameters", {}).get("retry_after", 10)
-            print(f"Rate limit, waiting {wait} seconds...")
-            time.sleep(wait + 1)
-            continue
-
-        print(f"Telegram API Error: {data}")
-        return False
     return False
 
 
@@ -393,7 +358,6 @@ def extract_media_details(title, desc=""):
 
     full_text = f"{title} {desc}"
 
-    # ডাব ভাষা শনাক্তকরণ
     target_langs = ["Hindi", "Tamil", "Telugu", "Bengali", "Malayalam", "Kannada", "English", "Japanese"]
     for lang in target_langs:
         pattern = rf'\b{lang}\b'
@@ -402,7 +366,6 @@ def extract_media_details(title, desc=""):
             if label not in audios:
                 audios.append(label)
 
-    # ব্র্যাকেট ফরম্যাট
     bracket_match = re.findall(r'\(([^)]+Dub|[^)]+Audio)\)', title, re.IGNORECASE)
     for b in bracket_match:
         b_clean = b.strip().title()
@@ -412,7 +375,6 @@ def extract_media_details(title, desc=""):
     if not audios:
         audios.append("Japanese")
 
-    # নাম ও এপিসোড আলাদা করা
     clean_title = re.sub(r'(\[[^\]]+\]|\([^)]+\))', '', title).strip()
 
     if " - " in clean_title:
@@ -439,6 +401,13 @@ def build_message(source_name, entry, entry_dt):
     desc = entry.get("description", "")
     published = format_to_ist(entry_dt, entry)
 
+    # ইউটিউব থাম্বনেইল সরাসরি বের করা
+    image_url = ""
+    if "media_thumbnail" in entry and entry["media_thumbnail"]:
+        image_url = entry["media_thumbnail"][0].get("url", "")
+    elif "enclosures" in entry and entry["enclosures"]:
+        image_url = entry["enclosures"][0].get("href", "")
+
     # Crunchyroll Releases
     if source_name == "Crunchyroll Latest Releases":
         anime_name, episode, audio, subs = extract_media_details(raw_title, desc)
@@ -451,10 +420,10 @@ def build_message(source_name, entry, entry_dt):
             f"📅 <b>Time:</b> <i>{html.escape(published)}</i>\n"
             f"🔗 <b>Platform:</b> <a href=\"{html.escape(link, quote=True)}\">Crunchyroll</a>"
         )
-        return msg, f"{anime_name} - {episode}", True
+        return msg, f"{anime_name} - {episode}", image_url, True
 
-    # Ani-One & Muse (YouTube Official Streaming)
-    if any(k in source_name for k in ["Ani-One", "Muse"]):
+    # Ani-One, Muse & Crunchyroll India YouTube Channels
+    if any(k in source_name for k in ["Ani-One", "Muse", "YouTube"]):
         anime_name, episode, audio, subs = extract_media_details(raw_title, desc)
         platform_name = source_name.replace(" Releases", "")
         msg = (
@@ -466,7 +435,7 @@ def build_message(source_name, entry, entry_dt):
             f"📅 <b>Time:</b> <i>{html.escape(published)}</i>\n"
             f"🔗 <b>Platform:</b> <a href=\"{html.escape(link, quote=True)}\">YouTube ({html.escape(platform_name)})</a>"
         )
-        return msg, f"{anime_name} - {episode}", True
+        return msg, f"{anime_name} - {episode}", image_url, True
 
     # OTT Streaming Alerts (Netflix, Prime Video, Disney+ Hotstar, JioCinema)
     if "Alert" in source_name:
@@ -480,7 +449,7 @@ def build_message(source_name, entry, entry_dt):
             f"📅 <b>Time:</b> <i>{html.escape(published)}</i>\n"
             f"🔗 <b>Platform:</b> <a href=\"{html.escape(link, quote=True)}\">{html.escape(platform_name)}</a>"
         )
-        return msg, anime_name, True
+        return msg, anime_name, image_url, True
 
     # General News & Japanese Articles Translation
     translated_title, ok = translate_if_japanese(raw_title)
@@ -493,7 +462,12 @@ def build_message(source_name, entry, entry_dt):
         msg += f"📅 <i>{html.escape(published)}</i>\n"
     if link:
         msg += f'🔗 <a href="{html.escape(link, quote=True)}">Read Full Article</a>'
-    return msg, translated_title, ok
+
+    # নিউজ আর্টিকেল পেজ থেকে og:image বের করা
+    if not image_url and link:
+        image_url = extract_og_image(link)
+
+    return msg, translated_title, image_url, ok
 
 
 def main():
@@ -503,30 +477,7 @@ def main():
     sent_posts = load_sent_posts()
     new_posts_found = 0
 
-    # 1. Crunchyroll Indian Release Calendar Scraping
-    cal_releases = fetch_crunchyroll_calendar()
-    for post_id, name, episode, audio, link in cal_releases:
-        if post_id in sent_posts:
-            continue
-
-        now_dt = datetime.now(timezone.utc)
-        published = format_to_ist(now_dt, {})
-        msg = (
-            "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
-            f"🎬 <b>Anime Name:</b> {html.escape(name)}\n"
-            f"🔢 <b>Episode:</b> {html.escape(episode)}\n"
-            f"🎙 <b>Audio Languages:</b> {html.escape(audio)}\n"
-            "📝 <b>Subtitles:</b> English\n"
-            f"📅 <b>Time:</b> <i>{html.escape(published)}</i>\n"
-            f"🔗 <b>Platform:</b> <a href=\"{html.escape(link, quote=True)}\">Crunchyroll</a>"
-        )
-        if send_telegram_message(msg):
-            save_sent_post(post_id)
-            sent_posts.add(post_id)
-            new_posts_found += 1
-            print(f"Posted Calendar Release: {name} - {episode} ({audio})")
-
-    # 2. RSS Feeds (News, YouTube & OTT Alerts)
+    # 1. Global & Regional RSS Feeds (YouTube, News & OTT Alerts)
     for feed_info in RSS_FEEDS:
         source_name = feed_info["name"]
         feed = fetch_feed(feed_info["url"])
@@ -551,21 +502,21 @@ def main():
             if entry_dt and entry_dt < CUTOFF_DATE:
                 continue
 
-            message, title, ok = build_message(source_name, entry, entry_dt)
+            message, title, image_url, ok = build_message(source_name, entry, entry_dt)
 
             if not ok:
                 print(f"Skipping untranslated post: {title[:40]}")
                 continue
 
-            if send_telegram_message(message):
+            if send_telegram_message(message, image_url):
                 save_sent_post(post_id)
                 sent_posts.add(post_id)
                 new_posts_found += 1
                 print(f"Posted: {title[:45]}")
 
-    # 3. AniList Schedule Backup
+    # 2. AniList Broadcast Schedule Backup
     anilist_releases = fetch_anilist_releases()
-    for post_id, name, episode, air_ts, link in anilist_releases:
+    for post_id, name, episode, air_ts, link, image_url in anilist_releases:
         if post_id in sent_posts:
             continue
         air_dt = datetime.fromtimestamp(air_ts, tz=timezone.utc)
@@ -582,7 +533,7 @@ def main():
             f"📅 <b>Time:</b> <i>{html.escape(published)}</i>\n"
             f"🔗 <b>Platform:</b> <a href=\"{html.escape(link, quote=True)}\">Crunchyroll</a>"
         )
-        if send_telegram_message(msg):
+        if send_telegram_message(msg, image_url):
             save_sent_post(post_id)
             sent_posts.add(post_id)
             new_posts_found += 1
