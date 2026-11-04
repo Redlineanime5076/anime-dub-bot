@@ -23,12 +23,13 @@ POSTS_PER_CR = 25
 HISTORY_FILE = "sent_posts.txt"
 ANILIST_HOURS = 8
 
-DEFAULT_IMAGE_URL = "https://raw.githubusercontent.com/Redlineanime5076/anime-dub-bot/main/default_logo.png"
+DEFAULT_IMAGE_URL = "https://upload.wikimedia.org/wikipedia/commons/thumb/0/08/Crunchyroll_Logo.png/600px-Crunchyroll_Logo.png"
 
+# সম্পূর্ণ বোল্ড করা ফুটার
 CHANNEL_FOOTER = """
-━━━━━━━━━━━━━━━━━━━━━━━━
-📢 Channel: @RedLineAnime
-💬 Don't miss any update, share with your friends!"""
+<b>━━━━━━━━━━━━━━━━━━━━━━━━</b>
+📢 <b>Channel: @RedLineAnime</b>
+💬 <b>Don't miss any update, share with your friends!</b>"""
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
@@ -200,7 +201,6 @@ def extract_og_image(article_url):
 
 
 def fetch_youtube_community_posts(channel_name, handle):
-    """ইউটিউব কমিউনিটি ট্যাব থেকে পোস্টের টেক্সট, ছবি ও লিংক সংগ্রহ করে"""
     url = f"https://www.youtube.com/@{handle}/community"
     posts = []
     try:
@@ -234,12 +234,9 @@ def fetch_youtube_community_posts(channel_name, handle):
                     continue
 
                 post_id = post_renderer.get("postId", "")
-                
-                # পোস্টের লেখা বের করা
                 text_runs = post_renderer.get("contentText", {}).get("runs", [])
                 post_text = "".join(r.get("text", "") for r in text_runs).strip()
 
-                # পোস্টের ছবি বের করা (যদি থাকে)
                 image_url = ""
                 attachments = post_renderer.get("backstageAttachment", {})
                 if "backstageImageRenderer" in attachments:
@@ -374,7 +371,10 @@ def send_telegram_message(message, image_url=""):
                 if data.get("ok"):
                     time.sleep(2.5)
                     return True
-            except Exception:
+                else:
+                    print(f"Photo send error: {data.get('description')}")
+            except Exception as e:
+                print(f"Exception sending photo: {e}")
                 time.sleep(3)
 
     payload = {
@@ -489,49 +489,53 @@ def build_message(source_name, entry, entry_dt):
     elif "enclosures" in entry and entry["enclosures"]:
         image_url = entry["enclosures"][0].get("href", "")
 
+    # 1. Crunchyroll Releases (সম্পূর্ণ বোল্ড)
     if source_name == "Crunchyroll Latest Releases":
         anime_name, episode, audio, subs = extract_media_details(raw_title, desc)
         msg = (
             "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
-            f"🎬 <b>Anime Name:</b> {html.escape(anime_name)}\n"
-            f"🔢 <b>Episode:</b> {html.escape(episode)}\n"
-            f"🎙 <b>Audio Languages:</b> {html.escape(audio)}\n"
-            f"📝 <b>Subtitles:</b> {html.escape(subs)}\n"
-            f"📅 <b>Time:</b> <i>{html.escape(published)}</i>\n"
-            f"🔗 <b>Platform:</b> <a href=\"{html.escape(link, quote=True)}\">Crunchyroll</a>\n"
+            f"🎬 <b>Anime Name: {html.escape(anime_name)}</b>\n"
+            f"🔢 <b>Episode: {html.escape(episode)}</b>\n"
+            f"🎙 <b>Audio Languages: {html.escape(audio)}</b>\n"
+            f"📝 <b>Subtitles: {html.escape(subs)}</b>\n"
+            f"📅 <b>Time: {html.escape(published)}</b>\n"
+            f"🔗 <b>Platform: <a href=\"{html.escape(link, quote=True)}\">Crunchyroll</a></b>\n"
             f"{CHANNEL_FOOTER}"
         )
         return msg, f"{anime_name} - {episode}", image_url, True
 
+    # 2. Ani-One, Muse & Crunchyroll India YouTube (সম্পূর্ণ বোল্ড)
     if any(k in source_name for k in ["Ani-One", "Muse", "YouTube"]):
         anime_name, episode, audio, subs = extract_media_details(raw_title, desc)
         platform_name = source_name.replace(" Releases", "")
         msg = (
             "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
-            f"🎬 <b>Anime Name:</b> {html.escape(anime_name)}\n"
-            f"🔢 <b>Episode:</b> {html.escape(episode)}\n"
-            f"🎙 <b>Audio Languages:</b> {html.escape(audio)}\n"
-            f"📝 <b>Subtitles:</b> {html.escape(subs)}\n"
-            f"📅 <b>Time:</b> <i>{html.escape(published)}</i>\n"
-            f"🔗 <b>Platform:</b> <a href=\"{html.escape(link, quote=True)}\">YouTube ({html.escape(platform_name)})</a>\n"
+            f"🎬 <b>Anime Name: {html.escape(anime_name)}</b>\n"
+            f"🔢 <b>Episode: {html.escape(episode)}</b>\n"
+            f"🎙 <b>Audio Languages: {html.escape(audio)}</b>\n"
+            f"📝 <b>Subtitles: {html.escape(subs)}</b>\n"
+            f"📅 <b>Time: {html.escape(published)}</b>\n"
+            f"🔗 <b>Platform: <a href=\"{html.escape(link, quote=True)}\">YouTube ({html.escape(platform_name)})</a></b>\n"
             f"{CHANNEL_FOOTER}"
         )
         return msg, f"{anime_name} - {episode}", image_url, True
 
+    # 3. OTT Streaming Alerts (সম্পূর্ণ বোল্ড)
     if "Alert" in source_name:
         platform_name = source_name.replace(" Anime Alert", "").strip()
         anime_name, episode, audio, subs = extract_media_details(raw_title, desc)
         msg = (
             "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
-            f"🎬 <b>Anime Name:</b> {html.escape(anime_name)}\n"
-            f"🎙 <b>Audio Languages:</b> {html.escape(audio)}\n"
-            f"📝 <b>Subtitles:</b> {html.escape(subs)}\n"
-            f"📅 <b>Time:</b> <i>{html.escape(published)}</i>\n"
-            f"🔗 <b>Platform:</b> <a href=\"{html.escape(link, quote=True)}\">{html.escape(platform_name)}</a>\n"
+            f"🎬 <b>Anime Name: {html.escape(anime_name)}</b>\n"
+            f"🎙 <b>Audio Languages: {html.escape(audio)}</b>\n"
+            f"📝 <b>Subtitles: {html.escape(subs)}</b>\n"
+            f"📅 <b>Time: {html.escape(published)}</b>\n"
+            f"🔗 <b>Platform: <a href=\"{html.escape(link, quote=True)}\">{html.escape(platform_name)}</a></b>\n"
             f"{CHANNEL_FOOTER}"
         )
         return msg, anime_name, image_url, True
 
+    # 4. News Articles (সম্পূর্ণ বোল্ড)
     translated_title, ok = translate_if_japanese(raw_title)
 
     msg = (
@@ -539,9 +543,9 @@ def build_message(source_name, entry, entry_dt):
         f"📢 <b>{html.escape(translated_title)}</b>\n\n"
     )
     if published:
-        msg += f"📅 <i>{html.escape(published)}</i>\n"
+        msg += f"📅 <b>{html.escape(published)}</b>\n"
     if link:
-        msg += f'🔗 <a href="{html.escape(link, quote=True)}">Read Full Article</a>\n'
+        msg += f'🔗 <b><a href="{html.escape(link, quote=True)}">Read Full Article</a></b>\n'
     
     msg += f"{CHANNEL_FOOTER}"
 
@@ -558,7 +562,7 @@ def main():
     sent_posts = load_sent_posts()
     new_posts_found = 0
 
-    # 1. YouTube Community Posts (Muse India, Ani-One India, Crunchyroll India)
+    # 1. YouTube Community Posts (সম্পূর্ণ বোল্ড)
     for ch in COMMUNITY_CHANNELS:
         posts = fetch_youtube_community_posts(ch["name"], ch["handle"])
         for p in posts:
@@ -571,8 +575,8 @@ def main():
 
             msg = (
                 f"📢 <b>[YouTube Community Post - {html.escape(p['channel'])}]</b>\n\n"
-                f"{html.escape(clean_text)}\n\n"
-                f'🔗 <a href="{html.escape(p["url"], quote=True)}">View Community Post</a>\n'
+                f"<b>{html.escape(clean_text)}</b>\n\n"
+                f'🔗 <b><a href="{html.escape(p["url"], quote=True)}">View Community Post</a></b>\n'
                 f"{CHANNEL_FOOTER}"
             )
             if send_telegram_message(msg, p["image"]):
@@ -618,7 +622,7 @@ def main():
                 new_posts_found += 1
                 print(f"Posted: {title[:45]}")
 
-    # 3. AniList Broadcast Schedule Backup
+    # 3. AniList Broadcast Schedule Backup (সম্পূর্ণ বোল্ড)
     anilist_releases = fetch_anilist_releases()
     for post_id, name, episode, air_ts, link, image_url in anilist_releases:
         if post_id in sent_posts:
@@ -630,12 +634,12 @@ def main():
         published = format_to_ist(air_dt, {})
         msg = (
             "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
-            f"🎬 <b>Anime Name:</b> {html.escape(name)}\n"
-            f"🔢 <b>Episode:</b> Episode {episode}\n"
-            "🎙 <b>Audio Languages:</b> Japanese\n"
-            "📝 <b>Subtitles:</b> English\n"
-            f"📅 <b>Time:</b> <i>{html.escape(published)}</i>\n"
-            f"🔗 <b>Platform:</b> <a href=\"{html.escape(link, quote=True)}\">Crunchyroll</a>\n"
+            f"🎬 <b>Anime Name: {html.escape(name)}</b>\n"
+            f"🔢 <b>Episode: Episode {episode}</b>\n"
+            "🎙 <b>Audio Languages: Japanese</b>\n"
+            "📝 <b>Subtitles: English</b>\n"
+            f"📅 <b>Time: {html.escape(published)}</b>\n"
+            f"🔗 <b>Platform: <a href=\"{html.escape(link, quote=True)}\">Crunchyroll</a></b>\n"
             f"{CHANNEL_FOOTER}"
         )
         if send_telegram_message(msg, image_url):
