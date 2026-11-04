@@ -8,6 +8,7 @@ from urllib.parse import quote
 from email.utils import parsedate_to_datetime
 import requests
 import feedparser
+from bs4 import BeautifulSoup
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = "@databaceforredlineanime"
@@ -16,99 +17,79 @@ if not BOT_TOKEN:
     print("Error: BOT_TOKEN not found in GitHub Secrets.")
     sys.exit(1)
 
-# ---------- সেটিংস ----------
-ONLY_HINDI = True          # Crunchyroll STREAMING_ALERT শুধু Hindi Dub এর জন্য
 POSTS_PER_FEED = 3
 POSTS_PER_CR = 25
-MAX_POSTS_PER_RUN = 30     # এক রানে সর্বোচ্চ এতগুলো পোস্ট
-MAX_AGE_HOURS = 48         # নিউজ ফিডের এর চেয়ে পুরোনো পোস্ট যাবে না
 HISTORY_FILE = "sent_posts.txt"
 SHOW_LINK_PREVIEW = True
+ANILIST_HOURS = 8
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5"
 }
-BROWSER_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
 
+CUTOFF_DATE = datetime(2026, 10, 29, 0, 0, 0, tzinfo=timezone.utc)
 JP_RE = re.compile(r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]")
-HINDI_RE = re.compile(
-    r"\bHindi\b(?:\s*\([^)]*\))?\s*(?:Dub|Audio)\b|\(\s*Hindi\s*\)", re.IGNORECASE
-)
-TITLE_CLEAN_RE = re.compile(
-    r"\s*\([^)]*\b(?:Dub|Audio)\b[^)]*\)|\s*\(\s*Hindi\s*\)", re.IGNORECASE
-)
-
-API = f"https://api.telegram.org/bot{BOT_TOKEN}"
-
-
-# ---------- Helpers ----------
-def is_hindi(text):
-    return bool(HINDI_RE.search(text or ""))
-
-
-def split_title(title):
-    clean = TITLE_CLEAN_RE.sub("", title).strip()
-    if " - " in clean:
-        parts = clean.split(" - ")
-        return parts[0].strip(), " - ".join(parts[1:]).strip()
-    m = re.split(r"\s+(Episode\s+\d+)", clean, flags=re.IGNORECASE)
-    if len(m) > 1:
-        return m[0].strip(), m[1].strip()
-    return clean, "Episode Update"
-
-
-def norm(s):
-    return re.sub(r"[^a-z0-9]", "", str(s).lower())
-
-
-def hindi_key(name, episode):
-    num = re.search(r"(\d+)", str(episode))
-    return f"cr-hindi::{norm(name)}::{num.group(1) if num else norm(episode)}"
 
 
 def translate_if_japanese(text):
     if not text or not JP_RE.search(text):
         return text, True
-    params = {"client": "gtx", "sl": "ja", "tl": "en", "dt": "t", "q": text}
+
+    api_url = "https://translate.googleapis.com/translate_a/single"
+    params = {
+        "client": "gtx",
+        "sl": "ja",
+        "tl": "en",
+        "dt": "t",
+        "q": text
+    }
+
     for attempt in range(3):
         try:
-            res = requests.get(
-                "https://translate.googleapis.com/translate_a/single",
-                params=params, headers=HEADERS, timeout=12,
-            )
+            res = requests.get(api_url, params=params, headers=HEADERS, timeout=12)
             if res.status_code == 200:
                 data = res.json()
-                out = "".join(p[0] for p in data[0] if p[0])
-                if out:
-                    return out.strip(), True
+                translated_text = "".join([part[0] for part in data[0] if part[0]])
+                if translated_text:
+                    return translated_text.strip(), True
         except Exception as e:
-            print(f"Translation error (attempt {attempt + 1}): {e}")
+            print(f"Translation API Error (attempt {attempt + 1}): {e}")
         time.sleep(2)
+
     return text, False
 
 
-def gnews(q, lang="en", country="US"):
-    return (f"https://news.google.com/rss/search?q={quote(q)}"
-            f"&hl={lang}-{country}&gl={country}&ceid={country}:{lang}")
+def gnews(q, lang="en", country="IN"):
+    return f"https://news.google.com/rss/search?q={quote(q)}&hl={lang}-{country}&gl={country}&ceid={country}:{lang}"
 
 
 def gnews_jp(q):
-    return (f"https://news.google.com/rss/search?q={quote(q)}"
-            f"&hl=ja&gl=JP&ceid=JP:ja")
+    return f"https://news.google.com/rss/search?q={quote(q)}&hl=ja&gl=JP&ceid=JP:ja"
 
 
 RSS_FEEDS = [
+    # Crunchyroll
     {"name": "Crunchyroll Latest Releases", "url": "https://www.crunchyroll.com/rss/anime"},
-    {"name": "Hindi Dub News", "url": gnews('Crunchyroll OR anime "Hindi dub" OR "Hindi dubbed"')},
+    {"name": "Crunchyroll News", "url": "https://cr-news-api-service.prd.crunchyrollsvc.com/v1/en-US/rss"},
+
+    # Official YouTube Streaming Channels (India & Asia)
+    {"name": "Ani-One India", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCv0r_aXN3Xz0IeBnrq_K7Lw"},
+    {"name": "Ani-One Asia", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC0wNSTMWIL3qaorLx0jie6A"},
+    {"name": "Muse India", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC5_TXXi1a_mK_YJm6y5U6_w"},
+    {"name": "Muse Asia", "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCGbsPEJY7rB87Uv3_uB_pCw"},
+
+    # OTT Anime Streaming Alerts (India)
+    {"name": "Netflix Anime Alert", "url": gnews('anime ("Netflix" OR "Netflix India") (streaming OR release OR added OR episodes)')},
+    {"name": "Prime Video Anime Alert", "url": gnews('anime ("Prime Video" OR "Amazon Prime") (streaming OR release OR Hindi OR Tamil OR Telugu)')},
+    {"name": "Disney+ Hotstar Anime Alert", "url": gnews('anime ("Disney+ Hotstar" OR "Disney Plus") (streaming OR release OR dubbed OR Hindi)')},
+    {"name": "JioCinema Anime Alert", "url": gnews('anime ("JioCinema" OR "Jio Cinema") (streaming OR release OR Hindi OR dubbed)')},
+
+    # Global Anime News Portals
     {"name": "Anime News Network", "url": "https://www.animenewsnetwork.com/news/rss.xml"},
     {"name": "ANN (All Content)", "url": "https://www.animenewsnetwork.com/all/rss.xml"},
     {"name": "MyAnimeList News", "url": "https://myanimelist.net/rss/news.xml"},
-    {"name": "Crunchyroll News", "url": "https://cr-news-api-service.prd.crunchyrollsvc.com/v1/en-US/rss"},
     {"name": "Otaku USA Magazine", "url": "https://otakuusamagazine.com/feed/"},
     {"name": "Siliconera", "url": "https://www.siliconera.com/category/anime/feed/"},
     {"name": "Anime UK News", "url": "https://animeuknews.net/feed/"},
@@ -116,22 +97,32 @@ RSS_FEEDS = [
     {"name": "Honey's Anime", "url": "https://honeysanime.com/feed/"},
     {"name": "Anime Herald", "url": "https://www.animeherald.com/feed/"},
     {"name": "The Fandom Post", "url": gnews("site:fandompost.com")},
+    {"name": "Anime Trending", "url": "https://anitrendz.net/news/feed/"},
     {"name": "Comic Natalie (JP)", "url": gnews_jp("site:natalie.mu/comic")},
+
+    # Manga & Adaptations
     {"name": "Manga Adaptation News", "url": gnews('"manga gets anime" OR "gets tv anime"')},
     {"name": "Light Novel Adaptations", "url": gnews('"light novel gets anime" OR "anime adaptation"')},
+
+    # Industry Confirmations
     {"name": "Anime Season Confirmations", "url": gnews('anime "release date" OR "season confirmed"')},
     {"name": "Anime Movie News", "url": gnews('anime film OR "anime movie" announced')},
     {"name": "Anime Cast & Staff", "url": gnews('anime "cast" OR "staff" announced')},
-    {"name": "Streaming Anime", "url": gnews('anime Netflix OR Crunchyroll OR "Prime Video" streaming')},
+
+    # Visuals, Teasers & PVs
     {"name": "Visual & Teaser Updates", "url": gnews('anime "key visual" OR "teaser visual"')},
     {"name": "Anime Character Designs", "url": gnews('anime "character visual" OR "teaser trailer"')},
     {"name": "Anime Trailer Released", "url": gnews('anime "official trailer" OR "main trailer" released')},
     {"name": "Anime PV/Teaser", "url": gnews('anime "promotional video" OR "teaser PV"')},
     {"name": "Anime Episode Preview", "url": gnews('anime "episode preview" OR "preview images"')},
     {"name": "Anime Opening/Ending", "url": gnews('anime "opening theme" OR "ending theme" MV')},
+
+    # Box Office & Records
     {"name": "Anime Box Office Records", "url": gnews('anime "box office" record OR milestone')},
     {"name": "Crunchyroll & Streaming Records", "url": gnews('anime Crunchyroll record OR viewership milestone')},
     {"name": "Anime Weekly Rankings", "url": gnews('anime ranking OR "anime of the week" OR "top anime"')},
+
+    # Japanese Media Announcements
     {"name": "JP Author Illustrations", "url": gnews_jp("描き下ろしイラスト アニメ")},
     {"name": "JP Author Congrats Art", "url": gnews_jp("原作者 お祝いイラスト アニメ")},
     {"name": "JP Anime Announcement", "url": gnews_jp("アニメ化決定")},
@@ -140,13 +131,151 @@ RSS_FEEDS = [
     {"name": "JP Cast Staff", "url": gnews_jp("アニメ キャスト スタッフ 解禁")},
     {"name": "JP Anime Movie", "url": gnews_jp("劇場アニメ 公開決定")},
     {"name": "JP Trailer/PV", "url": gnews_jp("アニメ 本予告 OR PV公開")},
-    {"name": "JP Episode Preview", "url": gnews_jp("アニメ 第 先行カット OR あらすじ")},
+    {"name": "JP Episode Preview (先行カット)", "url": gnews_jp("アニメ 第 先行カット OR あらすじ")},
     {"name": "JP Box Office Records", "url": gnews_jp("劇場アニメ 興行収入 突破")},
-    {"name": "JP Ranking Record", "url": gnews_jp("アニメ ランキング 1位 獲得")},
+    {"name": "JP Ranking Record", "url": gnews_jp("アニメ ランキング 1位 獲得")}
 ]
 
+API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-# ---------- History ----------
+ANILIST_URL = "https://graphql.anilist.co"
+ANILIST_QUERY = """
+query ($from: Int, $to: Int, $page: Int) {
+  Page(page: $page, perPage: 50) {
+    pageInfo { hasNextPage }
+    airingSchedules(airingAt_greater: $from, airingAt_lesser: $to, sort: TIME) {
+      episode
+      airingAt
+      media {
+        id
+        title { romaji english }
+        externalLinks { site url }
+      }
+    }
+  }
+}
+"""
+
+
+def fetch_crunchyroll_calendar():
+    results = []
+    now = datetime.now(timezone.utc)
+    date_strs = [(now - timedelta(days=1)).strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d")]
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Referer": "https://www.crunchyroll.com/releasecalendar",
+        "Cookie": "locale=en-IN; c_locale=en-IN; audio_preference=hi-IN;"
+    }
+
+    filters = ["hindi", "tamil", "telugu", "all"]
+
+    for d_str in date_strs:
+        for flt in filters:
+            if flt == "all":
+                url = f"https://www.crunchyroll.com/simulcastcalendar?date={d_str}"
+            else:
+                url = f"https://www.crunchyroll.com/simulcastcalendar?date={d_str}&filter={flt}"
+
+            try:
+                res = requests.get(url, headers=headers, timeout=20)
+                if res.status_code != 200:
+                    continue
+
+                soup = BeautifulSoup(res.text, "html.parser")
+                articles = soup.find_all(["article", "div"], class_=re.compile(r"release|calendar-entry|day-schedule", re.IGNORECASE))
+
+                for art in articles:
+                    title_elem = art.find(class_=re.compile(r"season-name|series-title|title", re.IGNORECASE))
+                    ep_elem = art.find(class_=re.compile(r"episode-name|episode-number|sub-title", re.IGNORECASE))
+                    link_elem = art.find("a", href=True)
+
+                    if not title_elem:
+                        continue
+
+                    raw_title = title_elem.get_text(strip=True)
+                    raw_ep = ep_elem.get_text(strip=True) if ep_elem else "Episode Update"
+                    link = link_elem["href"] if link_elem else "https://www.crunchyroll.com"
+                    if not link.startswith("http"):
+                        link = f"https://www.crunchyroll.com{link}"
+
+                    card_text = art.get_text(separator=" ", strip=True)
+                    audios = []
+
+                    if flt in ["hindi", "tamil", "telugu"]:
+                        audios.append(f"{flt.title()} Dub")
+
+                    for lang in ["Hindi", "Tamil", "Telugu", "English", "Japanese"]:
+                        if re.search(rf'\b{lang}\b', card_text, re.IGNORECASE):
+                            label = f"{lang.title()} Dub" if lang.lower() != "japanese" else "Japanese"
+                            if label not in audios:
+                                audios.append(label)
+
+                    if not audios:
+                        audios.append("Japanese")
+
+                    clean_title = re.sub(r'\(([^)]+Dub|[^)]+Audio|Hindi|Tamil|Telugu|English)\)', '', raw_title, flags=re.IGNORECASE).strip()
+                    post_id = f"cr-cal-{clean_title}-{raw_ep}-{'-'.join(audios)}"
+                    results.append((post_id, clean_title, raw_ep, ", ".join(audios), link))
+
+            except Exception as e:
+                print(f"Calendar Fetch Error ({flt}): {e}")
+
+    unique_results = []
+    seen_ids = set()
+    for item in results:
+        if item[0] not in seen_ids:
+            seen_ids.add(item[0])
+            unique_results.append(item)
+
+    return unique_results
+
+
+def fetch_anilist_releases(hours=ANILIST_HOURS):
+    now = int(time.time())
+    time_from = now - hours * 3600
+    results = []
+
+    for page in range(1, 4):
+        try:
+            res = requests.post(
+                ANILIST_URL,
+                json={
+                    "query": ANILIST_QUERY,
+                    "variables": {"from": time_from, "to": now, "page": page},
+                },
+                headers=HEADERS,
+                timeout=15,
+            )
+            data = res.json().get("data", {}).get("Page", {})
+        except Exception as e:
+            print(f"AniList Error: {e}")
+            break
+
+        if not data or "airingSchedules" not in data:
+            break
+
+        for item in data["airingSchedules"]:
+            media = item["media"]
+            link = next(
+                (l["url"] for l in (media.get("externalLinks") or [])
+                 if l.get("site") == "Crunchyroll"),
+                None,
+            )
+            if not link:
+                continue
+            title = media["title"].get("english") or media["title"].get("romaji") or "Unknown"
+            post_id = f"anilist-{media['id']}-{item['episode']}"
+            results.append((post_id, title, item["episode"], item["airingAt"], link))
+
+        if not data.get("pageInfo", {}).get("hasNextPage"):
+            break
+        time.sleep(1)
+
+    return results
+
+
 def load_sent_posts():
     if not os.path.exists(HISTORY_FILE):
         return set()
@@ -159,7 +288,6 @@ def save_sent_post(post_id):
         f.write(f"{post_id}\n")
 
 
-# ---------- Telegram ----------
 def preflight_check():
     try:
         me = requests.get(f"{API}/getMe", timeout=15).json()
@@ -178,7 +306,8 @@ def preflight_check():
 
     member = requests.get(
         f"{API}/getChatMember",
-        params={"chat_id": CHAT_ID, "user_id": bot_id}, timeout=15,
+        params={"chat_id": CHAT_ID, "user_id": bot_id},
+        timeout=15,
     ).json()
     if not member.get("ok"):
         print(f"Status Check Failed: {member}")
@@ -200,38 +329,30 @@ def send_telegram_message(message):
         "parse_mode": "HTML",
         "disable_web_page_preview": not SHOW_LINK_PREVIEW,
     }
-    for _ in range(3):
+    for attempt in range(3):
         try:
-            data = requests.post(f"{API}/sendMessage", json=payload, timeout=15).json()
+            res = requests.post(f"{API}/sendMessage", json=payload, timeout=15)
+            data = res.json()
         except Exception as e:
             print(f"Network Error: {e}")
             time.sleep(3)
             continue
+
         if data.get("ok"):
             time.sleep(2.5)
             return True
+
         if data.get("error_code") == 429:
             wait = data.get("parameters", {}).get("retry_after", 10)
-            print(f"Rate limit, waiting {wait}s...")
+            print(f"Rate limit, waiting {wait} seconds...")
             time.sleep(wait + 1)
             continue
+
         print(f"Telegram API Error: {data}")
         return False
     return False
 
 
-def stream_alert(name, episode, published, link):
-    return (
-        "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
-        f"🎬 <b>Anime Name:</b> {html.escape(name)}\n"
-        f"🔢 <b>Episode:</b> {html.escape(str(episode))}\n"
-        "🎙 <b>Audio:</b> Hindi Dub\n"
-        f"📅 <b>Time:</b> <i>{html.escape(published)}</i>\n"
-        f'🔗 <b>Platform:</b> <a href="{html.escape(link, quote=True)}">Crunchyroll</a>'
-    )
-
-
-# ---------- Sources ----------
 def fetch_feed(url):
     try:
         res = requests.get(url, headers=HEADERS, timeout=15)
@@ -249,214 +370,228 @@ def get_entry_datetime(entry):
     raw = entry.get("published") or entry.get("pubDate") or entry.get("updated")
     if raw:
         try:
-            return parsedate_to_datetime(raw).astimezone(timezone.utc)
+            dt = parsedate_to_datetime(raw)
+            return dt.astimezone(timezone.utc)
         except Exception:
             pass
     return None
 
 
-def format_to_ist(dt, entry=None):
-    if dt:
-        ist = timezone(timedelta(hours=5, minutes=30))
-        return dt.astimezone(ist).strftime("%d %b %Y, %I:%M %p IST")
-    entry = entry or {}
+def format_to_ist(entry_dt, entry):
+    if entry_dt:
+        ist_tz = timezone(timedelta(hours=5, minutes=30))
+        ist_dt = entry_dt.astimezone(ist_tz)
+        return ist_dt.strftime("%d %b %Y, %I:%M %p IST")
     return (entry.get("published") or entry.get("pubDate") or "").strip()
 
 
-def fetch_crunchyroll_hindi_calendar():
-    """আসল ব্রাউজারে ক্যালেন্ডার খুলে Hindi Dub এন্ট্রি আনে।"""
-    try:
-        from playwright.sync_api import sync_playwright
-    except Exception as e:
-        print(f"Playwright not installed: {e}")
-        return []
+def extract_media_details(title, desc=""):
+    anime_name = title
+    episode = "Episode Update"
+    audios = []
+    subtitles = ["English"]
 
-    results = []
-    now = datetime.now(timezone.utc)
-    urls = [
-        f"https://www.crunchyroll.com/releasecalendar?date={now.strftime('%Y-%m-%d')}",
-        f"https://www.crunchyroll.com/releasecalendar?date={(now - timedelta(days=7)).strftime('%Y-%m-%d')}",
-    ]
+    full_text = f"{title} {desc}"
 
-    js_extract = """
-    els => els.map(e => {
-        const card = e.closest('article') || e.closest('li') || e.parentElement;
-        return {
-            href: e.href,
-            text: ((e.innerText || '') + ' ' + (e.getAttribute('title') || '') + ' ' +
-                   (e.getAttribute('aria-label') || '')).trim(),
-            card: card ? (card.innerText || '') : ''
-        };
-    })
-    """
+    # ডাব ভাষা শনাক্তকরণ
+    target_langs = ["Hindi", "Tamil", "Telugu", "Bengali", "Malayalam", "Kannada", "English", "Japanese"]
+    for lang in target_langs:
+        pattern = rf'\b{lang}\b'
+        if re.search(pattern, full_text, re.IGNORECASE):
+            label = f"{lang.title()} Dub" if lang.lower() != "japanese" else "Japanese"
+            if label not in audios:
+                audios.append(label)
 
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            ctx = browser.new_context(
-                locale="en-IN",
-                user_agent=BROWSER_UA,
-                viewport={"width": 1400, "height": 2200},
-            )
-            page = ctx.new_page()
+    # ব্র্যাকেট ফরম্যাট
+    bracket_match = re.findall(r'\(([^)]+Dub|[^)]+Audio)\)', title, re.IGNORECASE)
+    for b in bracket_match:
+        b_clean = b.strip().title()
+        if b_clean not in audios:
+            audios.append(b_clean)
 
-            for url in urls:
-                try:
-                    page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                    page.wait_for_timeout(9000)
-                    page.mouse.wheel(0, 4000)       # lazy-load এর জন্য স্ক্রল
-                    page.wait_for_timeout(3000)
-                except Exception as e:
-                    print(f"Calendar load error: {e}")
-                    continue
+    if not audios:
+        audios.append("Japanese")
 
-                items = page.eval_on_selector_all(
-                    "a[href*='/watch/'], a[href*='/series/']", js_extract
-                )
-                body_text = ""
-                try:
-                    body_text = page.inner_text("body")
-                except Exception:
-                    pass
+    # নাম ও এপিসোড আলাদা করা
+    clean_title = re.sub(r'(\[[^\]]+\]|\([^)]+\))', '', title).strip()
 
-                hindi_items = [i for i in items if is_hindi(i["text"]) or is_hindi(i["card"])]
-                print(f"Calendar {url}")
-                print(f"  links={len(items)}, hindi_items={len(hindi_items)}, "
-                      f"'hindi' in page={len(re.findall('hindi', body_text, re.I))}")
-                for s in items[:4]:
-                    print("  sample:", s["text"][:90].replace("\n", " | "))
-                for m in list(re.finditer("hindi", body_text, re.I))[:3]:
-                    ctx_txt = body_text[max(0, m.start() - 50): m.end() + 50]
-                    print("  hindi-context:", ctx_txt.replace("\n", " | "))
+    if " - " in clean_title:
+        parts = clean_title.split(" - ")
+        anime_name = parts[0].strip()
+        episode = " - ".join(parts[1:]).strip()
+    elif " Episode " in clean_title:
+        parts = re.split(r'\s+(Episode\s+\d+)', clean_title, flags=re.IGNORECASE)
+        anime_name = parts[0].strip()
+        episode = parts[1].strip() if len(parts) > 1 else "Episode"
+    else:
+        anime_name = clean_title
 
-                for i in hindi_items:
-                    src = i["text"] if is_hindi(i["text"]) else i["card"]
-                    lines = [l.strip() for l in src.split("\n") if l.strip()]
-                    raw_title = next((l for l in lines if is_hindi(l)), lines[0] if lines else "")
-                    ep_match = re.search(r"(?:\bE|Episode\s*)(\d+)", src, re.IGNORECASE)
-                    raw_ep = f"Episode {ep_match.group(1)}" if ep_match else "Episode Update"
-                    name = TITLE_CLEAN_RE.sub("", raw_title).strip()
-                    if not name:
-                        continue
-                    results.append((hindi_key(name, raw_ep), name, raw_ep, i["href"]))
+    if re.search(r'\b(bengali|bangla)\b', full_text, re.IGNORECASE):
+        if "Bengali" not in subtitles:
+            subtitles.append("Bengali")
 
-            browser.close()
-    except Exception as e:
-        print(f"Playwright error: {e}")
-
-    seen, unique = set(), []
-    for item in results:
-        if item[0] not in seen:
-            seen.add(item[0])
-            unique.append(item)
-    return unique
+    return anime_name, episode, ", ".join(audios), ", ".join(subtitles)
 
 
-def build_news_message(source_name, entry, entry_dt):
-    """(message, title, ok, hindi_info) রিটার্ন করে।"""
+def build_message(source_name, entry, entry_dt):
     raw_title = entry.get("title", "Anime News Update").strip()
     link = entry.get("link", "").strip()
     desc = entry.get("description", "")
     published = format_to_ist(entry_dt, entry)
 
+    # Crunchyroll Releases
     if source_name == "Crunchyroll Latest Releases":
-        if not is_hindi(f"{raw_title} {desc}"):
-            return None, raw_title, True, "skip"
-        name, episode = split_title(raw_title)
-        msg = stream_alert(name, episode, published, link)
-        return msg, f"{name} - {episode}", True, (name, episode)
+        anime_name, episode, audio, subs = extract_media_details(raw_title, desc)
+        msg = (
+            "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
+            f"🎬 <b>Anime Name:</b> {html.escape(anime_name)}\n"
+            f"🔢 <b>Episode:</b> {html.escape(episode)}\n"
+            f"🎙 <b>Audio Languages:</b> {html.escape(audio)}\n"
+            f"📝 <b>Subtitles:</b> {html.escape(subs)}\n"
+            f"📅 <b>Time:</b> <i>{html.escape(published)}</i>\n"
+            f"🔗 <b>Platform:</b> <a href=\"{html.escape(link, quote=True)}\">Crunchyroll</a>"
+        )
+        return msg, f"{anime_name} - {episode}", True
 
-    title, ok = translate_if_japanese(raw_title)
+    # Ani-One & Muse (YouTube Official Streaming)
+    if any(k in source_name for k in ["Ani-One", "Muse"]):
+        anime_name, episode, audio, subs = extract_media_details(raw_title, desc)
+        platform_name = source_name.replace(" Releases", "")
+        msg = (
+            "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
+            f"🎬 <b>Anime Name:</b> {html.escape(anime_name)}\n"
+            f"🔢 <b>Episode:</b> {html.escape(episode)}\n"
+            f"🎙 <b>Audio Languages:</b> {html.escape(audio)}\n"
+            f"📝 <b>Subtitles:</b> {html.escape(subs)}\n"
+            f"📅 <b>Time:</b> <i>{html.escape(published)}</i>\n"
+            f"🔗 <b>Platform:</b> <a href=\"{html.escape(link, quote=True)}\">YouTube ({html.escape(platform_name)})</a>"
+        )
+        return msg, f"{anime_name} - {episode}", True
+
+    # OTT Streaming Alerts (Netflix, Prime Video, Disney+ Hotstar, JioCinema)
+    if "Alert" in source_name:
+        platform_name = source_name.replace(" Anime Alert", "").strip()
+        anime_name, episode, audio, subs = extract_media_details(raw_title, desc)
+        msg = (
+            "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
+            f"🎬 <b>Anime Name:</b> {html.escape(anime_name)}\n"
+            f"🎙 <b>Audio Languages:</b> {html.escape(audio)}\n"
+            f"📝 <b>Subtitles:</b> {html.escape(subs)}\n"
+            f"📅 <b>Time:</b> <i>{html.escape(published)}</i>\n"
+            f"🔗 <b>Platform:</b> <a href=\"{html.escape(link, quote=True)}\">{html.escape(platform_name)}</a>"
+        )
+        return msg, anime_name, True
+
+    # General News & Japanese Articles Translation
+    translated_title, ok = translate_if_japanese(raw_title)
+
     msg = (
         f"🔥 <b>[{html.escape(source_name)}]</b>\n\n"
-        f"📢 <b>{html.escape(title)}</b>\n\n"
+        f"📢 <b>{html.escape(translated_title)}</b>\n\n"
     )
     if published:
         msg += f"📅 <i>{html.escape(published)}</i>\n"
     if link:
         msg += f'🔗 <a href="{html.escape(link, quote=True)}">Read Full Article</a>'
-    return msg, title, ok, None
+    return msg, translated_title, ok
 
 
-# ---------- Main ----------
 def main():
     if not preflight_check():
         sys.exit(1)
 
-    sent = load_sent_posts()
-    new_count = 0
-    min_dt = datetime.now(timezone.utc) - timedelta(hours=MAX_AGE_HOURS)
+    sent_posts = load_sent_posts()
+    new_posts_found = 0
 
-    def mark(pid):
-        save_sent_post(pid)
-        sent.add(pid)
-
-    def limit_reached():
-        return new_count >= MAX_POSTS_PER_RUN
-
-    # 1. Crunchyroll Calendar (Hindi Dub) - আসল ব্রাউজার দিয়ে
-    for key, name, episode, link in fetch_crunchyroll_hindi_calendar():
-        if limit_reached():
-            break
-        if key in sent:
+    # 1. Crunchyroll Indian Release Calendar Scraping
+    cal_releases = fetch_crunchyroll_calendar()
+    for post_id, name, episode, audio, link in cal_releases:
+        if post_id in sent_posts:
             continue
-        msg = stream_alert(name, episode, format_to_ist(datetime.now(timezone.utc)), link)
+
+        now_dt = datetime.now(timezone.utc)
+        published = format_to_ist(now_dt, {})
+        msg = (
+            "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
+            f"🎬 <b>Anime Name:</b> {html.escape(name)}\n"
+            f"🔢 <b>Episode:</b> {html.escape(episode)}\n"
+            f"🎙 <b>Audio Languages:</b> {html.escape(audio)}\n"
+            "📝 <b>Subtitles:</b> English\n"
+            f"📅 <b>Time:</b> <i>{html.escape(published)}</i>\n"
+            f"🔗 <b>Platform:</b> <a href=\"{html.escape(link, quote=True)}\">Crunchyroll</a>"
+        )
         if send_telegram_message(msg):
-            mark(key)
-            new_count += 1
-            print(f"Hindi Dub (calendar): {name} - {episode}")
+            save_sent_post(post_id)
+            sent_posts.add(post_id)
+            new_posts_found += 1
+            print(f"Posted Calendar Release: {name} - {episode} ({audio})")
 
-    # 2. RSS Feeds
+    # 2. RSS Feeds (News, YouTube & OTT Alerts)
     for feed_info in RSS_FEEDS:
-        if limit_reached():
-            print("Run limit reached, rest will go next run.")
-            break
-
-        source = feed_info["name"]
+        source_name = feed_info["name"]
         feed = fetch_feed(feed_info["url"])
         if not feed.entries:
-            print(f"No entries: {source}")
             continue
 
-        limit = POSTS_PER_CR if source == "Crunchyroll Latest Releases" else POSTS_PER_FEED
-        for entry in reversed(feed.entries[:limit]):
-            if limit_reached():
-                break
+        limit = POSTS_PER_CR if source_name == "Crunchyroll Latest Releases" else POSTS_PER_FEED
 
+        for entry in reversed(feed.entries[:limit]):
             raw_id = entry.get("id") or entry.get("link") or ""
             raw_title = entry.get("title", "").strip()
-            post_id = f"{raw_id}::{raw_title}" if source == "Crunchyroll Latest Releases" else raw_id
-            if not post_id or post_id in sent:
+
+            if any(k in source_name for k in ["Crunchyroll", "Ani-One", "Muse", "Alert"]):
+                post_id = f"{raw_id}::{raw_title}"
+            else:
+                post_id = raw_id
+
+            if not post_id or post_id in sent_posts:
                 continue
 
             entry_dt = get_entry_datetime(entry)
-            if entry_dt and entry_dt < min_dt:
+            if entry_dt and entry_dt < CUTOFF_DATE:
                 continue
 
-            message, title, ok, hindi = build_news_message(source, entry, entry_dt)
+            message, title, ok = build_message(source_name, entry, entry_dt)
 
-            if hindi == "skip":      # Crunchyroll এন্ট্রি কিন্তু Hindi নয়
-                mark(post_id)
-                continue
             if not ok:
-                print(f"Skipping untranslated: {title[:40]}")
+                print(f"Skipping untranslated post: {title[:40]}")
                 continue
-
-            hkey = None
-            if hindi:
-                hkey = hindi_key(hindi[0], hindi[1])
-                if hkey in sent:
-                    mark(post_id)
-                    continue
 
             if send_telegram_message(message):
-                mark(post_id)
-                if hkey:
-                    mark(hkey)
-                new_count += 1
+                save_sent_post(post_id)
+                sent_posts.add(post_id)
+                new_posts_found += 1
                 print(f"Posted: {title[:45]}")
 
-    print("No new updates found." if new_count == 0 else f"Total {new_count} new posts sent.")
+    # 3. AniList Schedule Backup
+    anilist_releases = fetch_anilist_releases()
+    for post_id, name, episode, air_ts, link in anilist_releases:
+        if post_id in sent_posts:
+            continue
+        air_dt = datetime.fromtimestamp(air_ts, tz=timezone.utc)
+        if air_dt < CUTOFF_DATE:
+            continue
+
+        published = format_to_ist(air_dt, {})
+        msg = (
+            "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
+            f"🎬 <b>Anime Name:</b> {html.escape(name)}\n"
+            f"🔢 <b>Episode:</b> Episode {episode}\n"
+            "🎙 <b>Audio Languages:</b> Japanese\n"
+            "📝 <b>Subtitles:</b> English\n"
+            f"📅 <b>Time:</b> <i>{html.escape(published)}</i>\n"
+            f"🔗 <b>Platform:</b> <a href=\"{html.escape(link, quote=True)}\">Crunchyroll</a>"
+        )
+        if send_telegram_message(msg):
+            save_sent_post(post_id)
+            sent_posts.add(post_id)
+            new_posts_found += 1
+            print(f"AniList Alert: {name} - Ep {episode}")
+
+    if new_posts_found == 0:
+        print("No new updates found.")
+    else:
+        print(f"Total {new_posts_found} new posts sent.")
 
 
 if __name__ == "__main__":
