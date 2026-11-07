@@ -20,12 +20,10 @@ if not BOT_TOKEN:
 
 POSTS_PER_FEED = 3
 POSTS_PER_CR = 25
-POSTS_PER_X = 3
 HISTORY_FILE = "sent_posts.txt"
 
 # পার্মানেন্ট ইমেজ লিংক
 DEFAULT_IMAGE_URL = "https://i.postimg.cc/NfGqLbCv/1793778285021.png"
-
 # চ্যানেল ফুটার
 CHANNEL_FOOTER = """
 <b>━━━━━━━━━━━━━━━━━━━━━━━━</b>
@@ -97,29 +95,33 @@ def gnews_jp(q):
     return f"https://news.google.com/rss/search?q={quote(q)}&hl=ja&gl=JP&ceid=JP:ja"
 
 
+# স্থায়ী এবং পার্মানেন্ট আরএসএস ফিডস (কখনো এক্সপায়ার হবে না)
 RSS_FEEDS = [
-    # আপনার দেওয়া X (Twitter) এর ২টি RSS.app ফিড
-    {"name": "Anime Updates (X)", "url": "https://rss.app/feeds/Vyg4PnSkRE88jSxz.xml"},
-    {"name": "Anime Tweets (X)", "url": "https://rss.app/feeds/cMDshDhmpwrJs9LH.xml"},
+    # ১. ভারতীয় ও হিন্দি অ্যানিমে নিউজ (অফিশিয়াল ওয়েবসাইট ও লাইভ ওপেন ফিড)
+    {"name": "Animehinda (Hindi Updates)", "url": "https://animehinda.in/feed/"},
+    {"name": "OtakuOrbit India", "url": "https://otakuorbit.com/feed/"},
+    {"name": "India Anime & Hindi Dub News", "url": gnews('anime ("Anime Society India" OR "Hindi Dub" OR "AnimeTM" OR "Crunchyroll India" OR "Muse India")')},
 
-    # Crunchyroll Official RSS & News
+    # ২. Crunchyroll Official RSS & News
     {"name": "Crunchyroll Latest Releases", "url": "https://www.crunchyroll.com/rss/anime"},
     {"name": "Crunchyroll News", "url": "https://cr-news-api-service.prd.crunchyrollsvc.com/v1/en-US/rss"},
 
-    # OTT Anime Streaming Alerts (India)
+    # ৩. OTT Anime Streaming Alerts (India)
     {"name": "Netflix Anime Alert", "url": gnews('anime ("Netflix" OR "Netflix India") (streaming OR release OR added OR episodes)')},
     {"name": "Prime Video Anime Alert", "url": gnews('anime ("Prime Video" OR "Amazon Prime") (streaming OR release OR Hindi OR Tamil OR Telugu)')},
     {"name": "Disney+ Hotstar Anime Alert", "url": gnews('anime ("Disney+ Hotstar" OR "Disney Plus") (streaming OR release OR dubbed OR Hindi)')},
     {"name": "JioCinema Anime Alert", "url": gnews('anime ("JioCinema" OR "Jio Cinema") (streaming OR release OR Hindi OR dubbed)')},
 
-    # Global Anime News
+    # ৪. Global Verified Anime News
     {"name": "Anime News Network", "url": "https://www.animenewsnetwork.com/news/rss.xml"},
     {"name": "MyAnimeList News", "url": "https://myanimelist.net/rss/news.xml"},
     {"name": "Anime Corner", "url": "https://animecorner.me/feed/"},
     {"name": "Anime Trending", "url": "https://anitrendz.net/news/feed/"},
+    {"name": "CBR Anime News", "url": "https://www.cbr.com/feed/category/anime-news/"},
+    {"name": "DualShockers Anime", "url": "https://www.dualshockers.com/feed/category/anime/"},
     {"name": "Comic Natalie (JP)", "url": gnews_jp("site:natalie.mu/comic")},
 
-    # Manga & Adaptations
+    # ৫. Manga & Adaptations
     {"name": "Manga Adaptation News", "url": gnews('"manga gets anime" OR "gets tv anime"')},
     {"name": "Anime Season Confirmations", "url": gnews('anime "release date" OR "season confirmed"')},
     {"name": "Anime Trailer Released", "url": gnews('anime "official trailer" OR "main trailer" released')},
@@ -248,7 +250,6 @@ def format_to_ist(entry_dt, entry):
 
 
 def parse_language_codes(text):
-    """ক্যালেন্ডারের ছোট কোড এবং পুরো নাম শনাক্ত করে"""
     audios = []
     code_map = {
         "HI": "Hindi Dub",
@@ -344,7 +345,6 @@ def build_message(source_name, entry, entry_dt):
     published = format_to_ist(entry_dt, entry)
 
     image_url = ""
-    # RSS.app এর ইমেজ পার্সিং
     if "media_thumbnail" in entry and entry["media_thumbnail"]:
         image_url = entry["media_thumbnail"][0].get("url", "")
     elif "media_content" in entry and entry["media_content"]:
@@ -382,31 +382,7 @@ def build_message(source_name, entry, entry_dt):
         )
         return msg, anime_name, image_url, True
 
-    # ৩. এক্স (Twitter - RSS.app) পোস্টের জন্য বিশেষ মেসেজ
-    if "(X)" in source_name:
-        clean_tweet = clean_summary_text(desc or raw_title)
-        translated_tweet, _ = translate_if_japanese(clean_tweet)
-
-        msg = (
-            f"🐦 <b>[{html.escape(source_name)}]</b>\n\n"
-            f"💬 <b>{html.escape(translated_tweet)}</b>\n\n"
-        )
-        if published:
-            msg += f"📅 <b>{html.escape(published)}</b>\n"
-        if link:
-            msg += f'🔗 <b><a href="{html.escape(link, quote=True)}">View on X</a></b>\n'
-        msg += f"{CHANNEL_FOOTER}"
-
-        # ডেসক্রিপশন থেকে ইমেজ বের করার চেষ্টা (যদি থাকে)
-        if not image_url and desc:
-            soup = BeautifulSoup(desc, "html.parser")
-            img_tag = soup.find("img")
-            if img_tag and img_tag.get("src"):
-                image_url = img_tag["src"]
-
-        return msg, f"{source_name} Post", image_url, True
-
-    # ৪. গ্লোবাল অ্যানিমে নিউজ
+    # ৩. গ্লোবাল ও ভারতীয় অ্যানিমে নিউজ
     translated_title, ok = translate_if_japanese(raw_title)
     key_points = clean_summary_text(desc)
 
@@ -457,19 +433,14 @@ def main():
             new_posts_found += 1
             print(f"Posted Calendar Release: {rel['title']} ({rel['audio']})")
 
-    # ২. সমস্ত আরএসএস ফিড (X + Crunchyroll + OTT + Global News)
+    # ২. সমস্ত স্থায়ী আরএসএস ফিডস
     for feed_info in RSS_FEEDS:
         source_name = feed_info["name"]
         feed = fetch_feed(feed_info["url"])
         if not feed.entries:
             continue
 
-        if source_name == "Crunchyroll Latest Releases":
-            limit = POSTS_PER_CR
-        elif "(X)" in source_name:
-            limit = POSTS_PER_X
-        else:
-            limit = POSTS_PER_FEED
+        limit = POSTS_PER_CR if source_name == "Crunchyroll Latest Releases" else POSTS_PER_FEED
 
         for entry in reversed(feed.entries[:limit]):
             raw_id = entry.get("id") or entry.get("link") or ""
