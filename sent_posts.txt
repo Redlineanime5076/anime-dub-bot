@@ -842,3 +842,6 @@ https://myanimelist.net/news/74913365?_location=rss
 ed4439ba89551cc56212823cefa29ea1
 https://www.animenewsnetwork.com/cms/.243607
 3ac54e2c0b735672035852dfa7583ab3
+be6ef84b71e3e8e886b4531d44ae362b
+72d22dca7c776123155c35e86120ae2b
+https://www.animenewsnetwork.com/cms/.243608
