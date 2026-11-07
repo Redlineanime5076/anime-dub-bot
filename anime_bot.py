@@ -20,9 +20,10 @@ if not BOT_TOKEN:
 
 POSTS_PER_FEED = 3
 POSTS_PER_CR = 25
+POSTS_PER_X = 3
 HISTORY_FILE = "sent_posts.txt"
 
-# আপনার দেওয়া পার্মানেন্ট ইমেজ লিংক
+# পার্মানেন্ট ইমেজ লিংক
 DEFAULT_IMAGE_URL = "https://i.postimg.cc/NfGqLbCv/1793778285021.png"
 
 # বোল্ড ফুটার
@@ -39,6 +40,24 @@ HEADERS = {
 
 CUTOFF_DATE = datetime(2026, 10, 29, 0, 0, 0, tzinfo=timezone.utc)
 JP_RE = re.compile(r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]")
+
+# এক্স (Twitter) অ্যাকাউন্ট তালিকা
+# এখানে আপনার কাঙ্ক্ষিত X ইউজারনেমগুলো যুক্ত করতে পারেন (@ ছাড়া)
+X_ACCOUNTS = [
+    {"name": "Anime News & Updates (X)", "username": "AIR_News01"},
+    {"name": "Crunchyroll (X)", "username": "Crunchyroll"}
+]
+
+# Nitter এবং RSSHub-এর পাবলিক ইনস্ট্যান্স তালিকা (ফলব্যাকের জন্য)
+NITTER_INSTANCES = [
+    "https://nitter.net",
+    "https://nitter.privacydev.net",
+    "https://nitter.poast.org"
+]
+RSSHUB_INSTANCES = [
+    "https://rsshub.app",
+    "https://rsshub.rssforever.com"
+]
 
 
 def clean_summary_text(summary_html):
@@ -221,6 +240,35 @@ def fetch_feed(url):
         return feedparser.parse("")
 
 
+def fetch_x_feed(username):
+    """Nitter ও RSSHub উভয় মাধ্যমে এক্স (টুইটার) ফিড ফেচ করার ব্যবস্থা"""
+    # ১. প্রথমে Nitter ইনস্ট্যান্সগুলো দিয়ে ট্রাই করবে
+    for base in NITTER_INSTANCES:
+        try:
+            url = f"{base}/{username}/rss"
+            res = requests.get(url, headers=HEADERS, timeout=10)
+            if res.status_code == 200 and "<rss" in res.text:
+                feed = feedparser.parse(res.content)
+                if feed.entries:
+                    return feed
+        except Exception:
+            pass
+
+    # ২. Nitter ডাউন থাকলে RSSHub দিয়ে ট্রাই করবে
+    for base in RSSHUB_INSTANCES:
+        try:
+            url = f"{base}/twitter/user/{username}"
+            res = requests.get(url, headers=HEADERS, timeout=10)
+            if res.status_code == 200 and "<rss" in res.text:
+                feed = feedparser.parse(res.content)
+                if feed.entries:
+                    return feed
+        except Exception:
+            pass
+
+    return feedparser.parse("")
+
+
 def get_entry_datetime(entry):
     parsed = entry.get("published_parsed") or entry.get("updated_parsed")
     if parsed:
@@ -243,10 +291,8 @@ def format_to_ist(entry_dt, entry):
 
 
 def parse_language_codes(text):
-    """ক্যালেন্ডারের ছোট কোড (HI, TA, TE ইত্যাদি) এবং পুরো নাম শনাক্ত করে"""
+    """ক্যালেন্ডারের ছোট কোড এবং পুরো নাম শনাক্ত করে"""
     audios = []
-    
-    # কোড ম্যাপিং
     code_map = {
         "HI": "Hindi Dub",
         "TA": "Tamil Dub",
@@ -255,15 +301,12 @@ def parse_language_codes(text):
         "EN": "English",
         "JA": "Japanese"
     }
-    
-    # ১. পুরো শব্দ খোঁজা (যেমন: Hindi Dub)
+
     for code, full_name in [("HINDI", "Hindi Dub"), ("TAMIL", "Tamil Dub"), ("TELUGU", "Telugu Dub"), ("BENGALI", "Bengali Dub")]:
         if re.search(rf'\b{code}\b', text, re.IGNORECASE):
             if full_name not in audios:
                 audios.append(full_name)
 
-    # ২. ক্যালেন্ডারের মতো ছোট কোড খোঁজা (যেমন: EN, HI, TE)
-    # \bHI\b অথবা কমা/স্পেস দিয়ে আলাদা করা কোড ধরা হবে
     for code, full_name in code_map.items():
         if re.search(rf'(?:\b|,|\s){code}(?:\b|,|\s|\+)', text):
             if full_name not in audios:
@@ -295,38 +338,35 @@ def extract_media_details(title, desc=""):
 
 
 def fetch_crunchyroll_calendar():
-    """Crunchyroll রিলিজ ক্যালেন্ডার সরাসরি স্ক্র্যাপ করে আজকের রিলিজগুলো আনে"""
     url = "https://www.crunchyroll.com/simulcastcalendar"
     releases = []
     try:
         res = requests.get(url, headers=HEADERS, timeout=15)
         if res.status_code != 200:
             return releases
-        
+
         soup = BeautifulSoup(res.text, "html.parser")
-        # ক্যালেন্ডারের প্রতিটি এপিসোড কার্ড পার্স করা
         items = soup.find_all("li", class_=re.compile(r"calendar-entry|episode-item"))
         for item in items:
             title_elem = item.find(class_=re.compile(r"title|series-title"))
             if not title_elem:
                 continue
             title = title_elem.get_text(strip=True)
-            
-            # অডিও/ল্যাঙ্গুয়েজ ট্যাগ বের করা (EN, HI, TE ইত্যাদি)
+
             langs_elem = item.find(class_=re.compile(r"languages|audio-language"))
             langs_text = langs_elem.get_text(separator=" ", strip=True) if langs_elem else ""
-            
+
             ep_elem = item.find(class_=re.compile(r"episode-num|episode-label"))
             ep_text = ep_elem.get_text(strip=True) if ep_elem else "Episode Update"
-            
+
             link_elem = item.find("a", href=True)
             link = urljoin("https://www.crunchyroll.com", link_elem["href"]) if link_elem else "https://www.crunchyroll.com"
-            
+
             img_elem = item.find("img")
             img_url = img_elem.get("src") or img_elem.get("data-src", "") if img_elem else ""
 
             audios = parse_language_codes(f"{title} {langs_text}")
-            
+
             releases.append({
                 "id": f"cr-cal-{title}-{ep_text}",
                 "title": title,
@@ -382,7 +422,34 @@ def build_message(source_name, entry, entry_dt):
         )
         return msg, anime_name, image_url, True
 
-    # ৩. গ্লোবাল অ্যানিমে নিউজ (Key Points সহ)
+    # ৩. এক্স (Twitter) পোস্টের জন্য বিশেষ মেসেজ
+    if "(X)" in source_name:
+        clean_tweet = clean_summary_text(desc or raw_title)
+        translated_tweet, _ = translate_if_japanese(clean_tweet)
+
+        # Nitter লিঙ্ক থাকলে আসল x.com লিঙ্কে পরিবর্তন
+        real_link = re.sub(r'https?://[^/]+', 'https://x.com', link) if link else ""
+
+        msg = (
+            f"🐦 <b>[{html.escape(source_name)}]</b>\n\n"
+            f"💬 <b>{html.escape(translated_tweet)}</b>\n\n"
+        )
+        if published:
+            msg += f"📅 <b>{html.escape(published)}</b>\n"
+        if real_link:
+            msg += f'🔗 <b><a href="{html.escape(real_link, quote=True)}">View on X</a></b>\n'
+        msg += f"{CHANNEL_FOOTER}"
+
+        # টুইটে ছবি থাকলে বের করা
+        if not image_url and desc:
+            soup = BeautifulSoup(desc, "html.parser")
+            img_tag = soup.find("img")
+            if img_tag and img_tag.get("src"):
+                image_url = img_tag["src"]
+
+        return msg, f"{source_name} Post", image_url, True
+
+    # ৪. গ্লোবাল অ্যানিমে নিউজ
     translated_title, ok = translate_if_japanese(raw_title)
     key_points = clean_summary_text(desc)
 
@@ -412,12 +479,12 @@ def main():
     sent_posts = load_sent_posts()
     new_posts_found = 0
 
-    # ১. Crunchyroll Live Release Calendar স্ক্র্যাপার
+    # ১. Crunchyroll Live Release Calendar
     cal_releases = fetch_crunchyroll_calendar()
     for rel in cal_releases:
         if rel["id"] in sent_posts:
             continue
-        
+
         msg = (
             "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
             f"🎬 <b>Anime Name: {html.escape(rel['title'])}</b>\n"
@@ -433,7 +500,32 @@ def main():
             new_posts_found += 1
             print(f"Posted Calendar Release: {rel['title']} ({rel['audio']})")
 
-    # ২. গ্লোবাল এবং ওটিটি আরএসএস ফিডস
+    # ২. এক্স (Twitter) অ্যাকাউন্ট স্ক্র্যাপার (Nitter + RSSHub)
+    for x_acc in X_ACCOUNTS:
+        feed = fetch_x_feed(x_acc["username"])
+        if not feed.entries:
+            continue
+
+        for entry in reversed(feed.entries[:POSTS_PER_X]):
+            raw_id = entry.get("id") or entry.get("link") or ""
+            if not raw_id or raw_id in sent_posts:
+                continue
+
+            entry_dt = get_entry_datetime(entry)
+            if entry_dt and entry_dt < CUTOFF_DATE:
+                continue
+
+            message, title, image_url, ok = build_message(x_acc["name"], entry, entry_dt)
+            if not ok:
+                continue
+
+            if send_telegram_message(message, image_url):
+                save_sent_post(raw_id)
+                sent_posts.add(raw_id)
+                new_posts_found += 1
+                print(f"Posted X Update: {x_acc['name']}")
+
+    # ৩. গ্লোবাল এবং ওটিটি আরএসএস ফিডস
     for feed_info in RSS_FEEDS:
         source_name = feed_info["name"]
         feed = fetch_feed(feed_info["url"])
