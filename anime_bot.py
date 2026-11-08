@@ -120,7 +120,7 @@ RSS_FEEDS = [
     {"name": "CBR Anime News", "url": "https://www.cbr.com/feed/category/anime-news/"},
     {"name": "DualShockers Anime", "url": "https://www.dualshockers.com/feed/category/anime/"},
     {"name": "Comic Natalie (JP)", "url": gnews_jp("site:natalie.mu/comic")},
-    {"name": "AnimeTV News", "url": "https://animetv-jp.net/feed/")},
+    {"name": "AnimeTV News", "url": "https://animetv-jp.net/feed/"},
     
 
     # ৫. Manga & Adaptations
