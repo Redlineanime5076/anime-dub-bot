@@ -120,12 +120,16 @@ RSS_FEEDS = [
     {"name": "CBR Anime News", "url": "https://www.cbr.com/feed/category/anime-news/"},
     {"name": "DualShockers Anime", "url": "https://www.dualshockers.com/feed/category/anime/"},
     {"name": "Comic Natalie (JP)", "url": gnews_jp("site:natalie.mu/comic")},
+    {"name": "AnimeTV News", "url": "https://animetv-jp.net/feed/")},
+    
 
     # ৫. Manga & Adaptations
     {"name": "Manga Adaptation News", "url": gnews('"manga gets anime" OR "gets tv anime"')},
     {"name": "Anime Season Confirmations", "url": gnews('anime "release date" OR "season confirmed"')},
     {"name": "Anime Trailer Released", "url": gnews('anime "official trailer" OR "main trailer" released')},
     {"name": "Anime PV/Teaser", "url": gnews('anime "promotional video" OR "teaser PV"')}
+    
+    
 ]
 
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
