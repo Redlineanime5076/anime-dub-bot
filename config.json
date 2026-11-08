@@ -1,5 +1,6 @@
 {
   "dry_run": false,
+  "admin_chat_id": "7154131818",
   "posts_per_feed": 3,
   "posts_per_cr": 25,
   "max_history_records": 1500,
@@ -14,6 +15,32 @@
     "quiz",
     "fan art"
   ],
+  "anime_tag_map": {
+    "solo leveling": "#SoloLeveling",
+    "jujutsu kaisen": "#JujutsuKaisen #JJK",
+    "demon slayer": "#DemonSlayer #KimetsuNoYaiba",
+    "one piece": "#OnePiece",
+    "naruto": "#Naruto",
+    "boruto": "#Boruto",
+    "bleach": "#Bleach",
+    "chainsaw man": "#ChainsawMan",
+    "my hero academia": "#MyHeroAcademia #MHA",
+    "attack on titan": "#AttackOnTitan #AOT",
+    "dragon ball": "#DragonBall",
+    "black clover": "#BlackClover",
+    "spy x family": "#SpyxFamily",
+    "kaiju no. 8": "#KaijuNo8",
+    "dr. stone": "#DrStone",
+    "haikyu": "#Haikyuu",
+    "blue lock": "#BlueLock",
+    "re:zero": "#ReZero",
+    "slime": "#Tensura #ThatTimeIGotReincarnatedAsASlime",
+    "tokyo revengers": "#TokyoRevengers",
+    "mushoku tensei": "#MushokuTensei",
+    "dandadan": "#Dandadan",
+    "blue box": "#BlueBox",
+    "sakamoto days": "#SakamotoDays"
+  },
   "rss_feeds": [
     {
       "name": "AnimeTV News",
