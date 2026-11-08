@@ -1,15 +1,29 @@
 import os
 import sys
 import time
+import json
 import html
 import re
 from io import BytesIO
+from difflib import SequenceMatcher
 from datetime import datetime, timezone, timedelta
-from urllib.parse import quote, urljoin
+from urllib.parse import urljoin
 from email.utils import parsedate_to_datetime
 import requests
 import feedparser
 from bs4 import BeautifulSoup
+
+# --- কনফিগ লোড ---
+CONFIG_FILE = "config.json"
+
+def load_config():
+    if not os.path.exists(CONFIG_FILE):
+        print(f"Error: {CONFIG_FILE} not found!")
+        sys.exit(1)
+    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+CONFIG = load_config()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = "@databaceforredlineanime"
@@ -18,17 +32,18 @@ if not BOT_TOKEN:
     print("Error: BOT_TOKEN not found in GitHub Secrets.")
     sys.exit(1)
 
-POSTS_PER_FEED = 3
-POSTS_PER_CR = 25
-HISTORY_FILE = "sent_posts.txt"
+DRY_RUN = CONFIG.get("dry_run", False)
+POSTS_PER_FEED = CONFIG.get("posts_per_feed", 3)
+POSTS_PER_CR = CONFIG.get("posts_per_cr", 25)
+MAX_HISTORY_RECORDS = CONFIG.get("max_history_records", 1500)
+SIMILARITY_THRESHOLD = CONFIG.get("title_similarity_threshold", 0.72)
+BLOCKLIST = [k.lower() for k in CONFIG.get("blocklist_keywords", [])]
+DEFAULT_IMAGE_URL = CONFIG.get("default_image_url", "https://i.postimg.cc/NfGqLbCv/1793778285021.png")
+CHANNEL_FOOTER = CONFIG.get("channel_footer", "")
+RSS_FEEDS = CONFIG.get("rss_feeds", [])
 
-# পার্মানেন্ট ইমেজ লিংক
-DEFAULT_IMAGE_URL = "https://i.postimg.cc/NfGqLbCv/1793778285021.png"
-# চ্যানেল ফুটার
-CHANNEL_FOOTER = """
-<b>━━━━━━━━━━━━━━━━━━━━━━━━</b>
-📢 <b>Channel: @RedLineAnime</b>
-💬 <b>Don't miss any update, share with your friends!</b>"""
+HISTORY_FILE = "sent_posts.txt"
+RECENT_TITLES_FILE = "recent_titles.txt"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -38,10 +53,10 @@ HEADERS = {
 
 CUTOFF_DATE = datetime(2026, 10, 29, 0, 0, 0, tzinfo=timezone.utc)
 JP_RE = re.compile(r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]")
+API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 
 def clean_summary_text(summary_html):
-    """সামারি থেকে HTML ট্যাগ পরিষ্কার করে ১-২ লাইনের Key Points তৈরি করে"""
     if not summary_html:
         return ""
     soup = BeautifulSoup(summary_html, "html.parser")
@@ -64,13 +79,7 @@ def translate_if_japanese(text):
         return text, True
 
     api_url = "https://translate.googleapis.com/translate_a/single"
-    params = {
-        "client": "gtx",
-        "sl": "ja",
-        "tl": "en",
-        "dt": "t",
-        "q": text
-    }
+    params = {"client": "gtx", "sl": "ja", "tl": "en", "dt": "t", "q": text}
 
     for attempt in range(3):
         try:
@@ -85,54 +94,6 @@ def translate_if_japanese(text):
         time.sleep(2)
 
     return text, False
-
-
-def gnews(q, lang="en", country="IN"):
-    return f"https://news.google.com/rss/search?q={quote(q)}&hl={lang}-{country}&gl={country}&ceid={country}:{lang}"
-
-
-def gnews_jp(q):
-    return f"https://news.google.com/rss/search?q={quote(q)}&hl=ja&gl=JP&ceid=JP:ja"
-
-
-# স্থায়ী এবং পার্মানেন্ট আরএসএস ফিডস (কখনো এক্সপায়ার হবে না)
-RSS_FEEDS = [
-    # ১. ভারতীয় ও হিন্দি অ্যানিমে নিউজ (অফিশিয়াল ওয়েবসাইট ও লাইভ ওপেন ফিড)
-    {"name": "Animehinda (Hindi Updates)", "url": "https://animehinda.in/feed/"},
-    {"name": "OtakuOrbit India", "url": "https://otakuorbit.com/feed/"},
-    {"name": "India Anime & Hindi Dub News", "url": gnews('anime ("Anime Society India" OR "Hindi Dub" OR "AnimeTM" OR "Crunchyroll India" OR "Muse India")')},
-
-    # ২. Crunchyroll Official RSS & News
-    {"name": "Crunchyroll Latest Releases", "url": "https://www.crunchyroll.com/rss/anime"},
-    {"name": "Crunchyroll News", "url": "https://cr-news-api-service.prd.crunchyrollsvc.com/v1/en-US/rss"},
-
-    # ৩. OTT Anime Streaming Alerts (India)
-    {"name": "Netflix Anime Alert", "url": gnews('anime ("Netflix" OR "Netflix India") (streaming OR release OR added OR episodes)')},
-    {"name": "Prime Video Anime Alert", "url": gnews('anime ("Prime Video" OR "Amazon Prime") (streaming OR release OR Hindi OR Tamil OR Telugu)')},
-    {"name": "Disney+ Hotstar Anime Alert", "url": gnews('anime ("Disney+ Hotstar" OR "Disney Plus") (streaming OR release OR dubbed OR Hindi)')},
-    {"name": "JioCinema Anime Alert", "url": gnews('anime ("JioCinema" OR "Jio Cinema") (streaming OR release OR Hindi OR dubbed)')},
-
-    # ৪. Global Verified Anime News
-    {"name": "Anime News Network", "url": "https://www.animenewsnetwork.com/news/rss.xml"},
-    {"name": "MyAnimeList News", "url": "https://myanimelist.net/rss/news.xml"},
-    {"name": "Anime Corner", "url": "https://animecorner.me/feed/"},
-    {"name": "Anime Trending", "url": "https://anitrendz.net/news/feed/"},
-    {"name": "CBR Anime News", "url": "https://www.cbr.com/feed/category/anime-news/"},
-    {"name": "DualShockers Anime", "url": "https://www.dualshockers.com/feed/category/anime/"},
-    {"name": "Comic Natalie (JP)", "url": gnews_jp("site:natalie.mu/comic")},
-    {"name": "AnimeTV News", "url": "https://animetv-jp.net/feed/"},
-    
-
-    # ৫. Manga & Adaptations
-    {"name": "Manga Adaptation News", "url": gnews('"manga gets anime" OR "gets tv anime"')},
-    {"name": "Anime Season Confirmations", "url": gnews('anime "release date" OR "season confirmed"')},
-    {"name": "Anime Trailer Released", "url": gnews('anime "official trailer" OR "main trailer" released')},
-    {"name": "Anime PV/Teaser", "url": gnews('anime "promotional video" OR "teaser PV"')}
-    
-    
-]
-
-API = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 
 def extract_og_image(article_url):
@@ -161,16 +122,37 @@ def extract_og_image(article_url):
     return ""
 
 
-def load_sent_posts():
-    if not os.path.exists(HISTORY_FILE):
-        return set()
-    with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-        return set(line.strip() for line in f if line.strip())
+# --- হিস্ট্রি ফাইল ও ডুপ্লিকেট চেকার ---
+def load_lines(filename):
+    if not os.path.exists(filename):
+        return []
+    with open(filename, "r", encoding="utf-8") as f:
+        return [line.strip() for line in f if line.strip()]
 
 
-def save_sent_post(post_id):
-    with open(HISTORY_FILE, "a", encoding="utf-8") as f:
-        f.write(f"{post_id}\n")
+def save_lines_capped(filename, new_item, max_records):
+    items = load_lines(filename)
+    items.append(new_item)
+    if len(items) > max_records:
+        items = items[-max_records:]
+    with open(filename, "w", encoding="utf-8") as f:
+        for item in items:
+            f.write(f"{item}\n")
+
+
+def is_title_duplicate(title, recent_titles):
+    clean_t = re.sub(r'[^a-zA-Z0-9\s]', '', title.lower()).strip()
+    for prev in recent_titles:
+        clean_prev = re.sub(r'[^a-zA-Z0-9\s]', '', prev.lower()).strip()
+        sim = SequenceMatcher(None, clean_t, clean_prev).ratio()
+        if sim >= SIMILARITY_THRESHOLD:
+            return True
+    return False
+
+
+def is_blocked(title):
+    t_lower = title.lower()
+    return any(word in t_lower for word in BLOCKLIST)
 
 
 def preflight_check():
@@ -184,7 +166,19 @@ def preflight_check():
         return False
 
 
-def send_telegram_message(message, image_url=""):
+def send_telegram_message(message, image_url="", button_url="", button_text="Read Full Article"):
+    if DRY_RUN:
+        print(f"[DRY_RUN] Message to post:\n{message[:200]}...\nImage: {image_url}\nButton: {button_url}")
+        return True
+
+    reply_markup = None
+    if button_url and button_url.startswith("http"):
+        reply_markup = {
+            "inline_keyboard": [
+                [{"text": f"🔗 {button_text}", "url": button_url}]
+            ]
+        }
+
     target_image = image_url if image_url else DEFAULT_IMAGE_URL
 
     if target_image:
@@ -198,6 +192,9 @@ def send_telegram_message(message, image_url=""):
                     "caption": message[:1024],
                     "parse_mode": "HTML"
                 }
+                if reply_markup:
+                    data["reply_markup"] = json.dumps(reply_markup)
+
                 res = requests.post(f"{API}/sendPhoto", data=data, files=files, timeout=25)
                 if res.json().get("ok"):
                     time.sleep(2.5)
@@ -211,6 +208,9 @@ def send_telegram_message(message, image_url=""):
         "parse_mode": "HTML",
         "disable_web_page_preview": False,
     }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+
     for _ in range(3):
         try:
             res = requests.post(f"{API}/sendMessage", json=payload, timeout=15)
@@ -263,7 +263,6 @@ def parse_language_codes(text):
         "EN": "English",
         "JA": "Japanese"
     }
-
     for code, full_name in [("HINDI", "Hindi Dub"), ("TAMIL", "Tamil Dub"), ("TELUGU", "Telugu Dub"), ("BENGALI", "Bengali Dub")]:
         if re.search(rf'\b{code}\b', text, re.IGNORECASE):
             if full_name not in audios:
@@ -276,7 +275,6 @@ def parse_language_codes(text):
 
     if not audios:
         audios.append("Japanese (Original)")
-
     return audios
 
 
@@ -361,15 +359,14 @@ def build_message(source_name, entry, entry_dt):
         anime_name, episode, audio, subs = extract_media_details(raw_title, desc)
         msg = (
             "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
-            f"🎬 <b>Anime Name: {html.escape(anime_name)}</b>\n"
+            f"🎬 <b>Anime: {html.escape(anime_name)}</b>\n"
             f"🔢 <b>Episode: {html.escape(episode)}</b>\n"
-            f"🎙 <b>Audio Languages: {html.escape(audio)}</b>\n"
+            f"🎙 <b>Audio: {html.escape(audio)}</b>\n"
             f"📝 <b>Subtitles: {html.escape(subs)}</b>\n"
             f"📅 <b>Time: {html.escape(published)}</b>\n"
-            f"🔗 <b>Platform: <a href=\"{html.escape(link, quote=True)}\">Crunchyroll</a></b>\n"
             f"{CHANNEL_FOOTER}"
         )
-        return msg, f"{anime_name} - {episode}", image_url, True
+        return msg, f"{anime_name} - {episode}", image_url, link, "Watch on Crunchyroll", True
 
     # ২. OTT স্ট্রিমিং অ্যালার্ট
     if "Alert" in source_name:
@@ -377,14 +374,14 @@ def build_message(source_name, entry, entry_dt):
         anime_name, episode, audio, subs = extract_media_details(raw_title, desc)
         msg = (
             "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
-            f"🎬 <b>Anime Name: {html.escape(anime_name)}</b>\n"
-            f"🎙 <b>Audio Languages: {html.escape(audio)}</b>\n"
+            f"🎬 <b>Anime: {html.escape(anime_name)}</b>\n"
+            f"📺 <b>Platform: {html.escape(platform_name)}</b>\n"
+            f"🎙 <b>Audio: {html.escape(audio)}</b>\n"
             f"📝 <b>Subtitles: {html.escape(subs)}</b>\n"
             f"📅 <b>Time: {html.escape(published)}</b>\n"
-            f"🔗 <b>Platform: <a href=\"{html.escape(link, quote=True)}\">{html.escape(platform_name)}</a></b>\n"
             f"{CHANNEL_FOOTER}"
         )
-        return msg, anime_name, image_url, True
+        return msg, anime_name, image_url, link, f"Watch on {platform_name}", True
 
     # ৩. গ্লোবাল ও ভারতীয় অ্যানিমে নিউজ
     translated_title, ok = translate_if_japanese(raw_title)
@@ -398,22 +395,21 @@ def build_message(source_name, entry, entry_dt):
         msg += f"📌 <b>Key Points:</b>\n• <b>{html.escape(key_points)}</b>\n\n"
     if published:
         msg += f"📅 <b>{html.escape(published)}</b>\n"
-    if link:
-        msg += f'🔗 <b><a href="{html.escape(link, quote=True)}">Read Full Article</a></b>\n'
 
     msg += f"{CHANNEL_FOOTER}"
 
     if not image_url and link:
         image_url = extract_og_image(link)
 
-    return msg, translated_title, image_url, ok
+    return msg, translated_title, image_url, link, "Read Full Article", ok
 
 
 def main():
     if not preflight_check():
         sys.exit(1)
 
-    sent_posts = load_sent_posts()
+    sent_posts = set(load_lines(HISTORY_FILE))
+    recent_titles = load_lines(RECENT_TITLES_FILE)
     new_posts_found = 0
 
     # ১. Crunchyroll Live Release Calendar
@@ -424,20 +420,19 @@ def main():
 
         msg = (
             "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
-            f"🎬 <b>Anime Name: {html.escape(rel['title'])}</b>\n"
+            f"🎬 <b>Anime: {html.escape(rel['title'])}</b>\n"
             f"🔢 <b>Episode: {html.escape(rel['episode'])}</b>\n"
-            f"🎙 <b>Audio Languages: {html.escape(rel['audio'])}</b>\n"
+            f"🎙 <b>Audio: {html.escape(rel['audio'])}</b>\n"
             "📝 <b>Subtitles: English</b>\n"
-            f"🔗 <b>Platform: <a href=\"{html.escape(rel['link'], quote=True)}\">Crunchyroll</a></b>\n"
             f"{CHANNEL_FOOTER}"
         )
-        if send_telegram_message(msg, rel["image"]):
-            save_sent_post(rel["id"])
+        if send_telegram_message(msg, rel["image"], rel["link"], "Watch on Crunchyroll"):
+            save_lines_capped(HISTORY_FILE, rel["id"], MAX_HISTORY_RECORDS)
             sent_posts.add(rel["id"])
             new_posts_found += 1
-            print(f"Posted Calendar Release: {rel['title']} ({rel['audio']})")
+            print(f"Posted Calendar: {rel['title']} ({rel['audio']})")
 
-    # ২. সমস্ত স্থায়ী আরএসএস ফিডস
+    # ২. সমস্ত আরএসএস ফিডস
     for feed_info in RSS_FEEDS:
         source_name = feed_info["name"]
         feed = fetch_feed(feed_info["url"])
@@ -455,17 +450,29 @@ def main():
             if not post_id or post_id in sent_posts:
                 continue
 
+            # ব্লকলিস্ট ফিল্টার
+            if is_blocked(raw_title):
+                continue
+
+            # ডুপ্লিকেট নিউজ ফিল্টার (ক্যালেন্ডার ও স্ট্রিমিং বাদে সাধারণ নিউজের ক্ষেত্রে)
+            if not any(k in source_name for k in ["Crunchyroll", "Alert"]):
+                if is_title_duplicate(raw_title, recent_titles):
+                    print(f"Skipped duplicate news: {raw_title[:40]}...")
+                    continue
+
             entry_dt = get_entry_datetime(entry)
             if entry_dt and entry_dt < CUTOFF_DATE:
                 continue
 
-            message, title, image_url, ok = build_message(source_name, entry, entry_dt)
+            message, title, image_url, button_url, button_text, ok = build_message(source_name, entry, entry_dt)
             if not ok:
                 continue
 
-            if send_telegram_message(message, image_url):
-                save_sent_post(post_id)
+            if send_telegram_message(message, image_url, button_url, button_text):
+                save_lines_capped(HISTORY_FILE, post_id, MAX_HISTORY_RECORDS)
+                save_lines_capped(RECENT_TITLES_FILE, raw_title, 200)
                 sent_posts.add(post_id)
+                recent_titles.append(raw_title)
                 new_posts_found += 1
                 print(f"Posted: {title[:45]}")
 
