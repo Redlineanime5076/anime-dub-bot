@@ -13,7 +13,6 @@ import requests
 import feedparser
 from bs4 import BeautifulSoup
 
-# --- কনফিগ লোড ---
 CONFIG_FILE = "config.json"
 
 def load_config():
@@ -27,6 +26,7 @@ CONFIG = load_config()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = "@databaceforredlineanime"
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID") or CONFIG.get("admin_chat_id", "7154131818")
 
 if not BOT_TOKEN:
     print("Error: BOT_TOKEN not found in GitHub Secrets.")
@@ -41,6 +41,7 @@ BLOCKLIST = [k.lower() for k in CONFIG.get("blocklist_keywords", [])]
 DEFAULT_IMAGE_URL = CONFIG.get("default_image_url", "https://i.postimg.cc/NfGqLbCv/1793778285021.png")
 CHANNEL_FOOTER = CONFIG.get("channel_footer", "")
 RSS_FEEDS = CONFIG.get("rss_feeds", [])
+ANIME_TAG_MAP = CONFIG.get("anime_tag_map", {})
 
 HISTORY_FILE = "sent_posts.txt"
 RECENT_TITLES_FILE = "recent_titles.txt"
@@ -54,6 +55,49 @@ HEADERS = {
 CUTOFF_DATE = datetime(2026, 10, 29, 0, 0, 0, tzinfo=timezone.utc)
 JP_RE = re.compile(r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]")
 API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+
+def send_admin_alert(error_message):
+    """সমস্যা হলে অ্যাডমিনকে সরাসরি পার্সোনাল মেসেজ পাঠায়"""
+    if not ADMIN_CHAT_ID or DRY_RUN:
+        return
+    text = f"⚠️ <b>[Anime Bot Alert]</b>\n\n{html.escape(error_message)}"
+    try:
+        requests.post(f"{API}/sendMessage", json={
+            "chat_id": ADMIN_CHAT_ID,
+            "text": text,
+            "parse_mode": "HTML"
+        }, timeout=10)
+    except Exception:
+        pass
+
+
+def generate_hashtags(title, source_name=""):
+    """টাইটেল ও সোর্স অনুযায়ী প্রয়োজনীয় হ্যাশট্যাগ যোগ করে"""
+    tags = set()
+    t_lower = title.lower()
+
+    # জনপ্রিয় এনিমে হ্যাশট্যাগ
+    for name, tag_str in ANIME_TAG_MAP.items():
+        if name in t_lower:
+            for t in tag_str.split():
+                tags.add(t)
+
+    # ক্যাটাগরি হ্যাশট্যাগ
+    if any(k in t_lower for k in ["trailer", "pv", "teaser"]):
+        tags.add("#Trailer")
+    if any(k in t_lower for k in ["season 2", "s2", "season 3", "s3", "second season", "third season"]):
+        tags.add("#NewSeason")
+    if any(k in t_lower for k in ["movie", "film"]):
+        tags.add("#AnimeMovie")
+    if any(k in t_lower for k in ["hindi", "dubbed", "dub"]):
+        tags.add("#HindiDub")
+    if "Alert" in source_name or "Crunchyroll Latest" in source_name:
+        tags.add("#StreamingAlert")
+    else:
+        tags.add("#AnimeNews")
+
+    return " ".join(sorted(tags))
 
 
 def clean_summary_text(summary_html):
@@ -122,7 +166,6 @@ def extract_og_image(article_url):
     return ""
 
 
-# --- হিস্ট্রি ফাইল ও ডুপ্লিকেট চেকার ---
 def load_lines(filename):
     if not os.path.exists(filename):
         return []
@@ -159,10 +202,15 @@ def preflight_check():
     try:
         me = requests.get(f"{API}/getMe", timeout=15).json()
         if not me.get("ok"):
+            send_admin_alert("Bot Token Invalid or getMe failed!")
             return False
         chat = requests.get(f"{API}/getChat", params={"chat_id": CHAT_ID}, timeout=15).json()
-        return chat.get("ok", False)
-    except Exception:
+        if not chat.get("ok", False):
+            send_admin_alert(f"Cannot access channel {CHAT_ID}. Ensure bot is an admin.")
+            return False
+        return True
+    except Exception as e:
+        send_admin_alert(f"Preflight Exception: {e}")
         return False
 
 
@@ -222,13 +270,16 @@ def send_telegram_message(message, image_url="", button_url="", button_text="Rea
     return False
 
 
-def fetch_feed(url):
+def fetch_feed(url, name=""):
     try:
         res = requests.get(url, headers=HEADERS, timeout=15)
         if res.status_code == 200:
             return feedparser.parse(res.content)
+        elif res.status_code in [403, 404, 500]:
+            print(f"Feed error ({res.status_code}) on {name}")
         return feedparser.parse("")
-    except Exception:
+    except Exception as e:
+        print(f"Exception fetching {name}: {e}")
         return feedparser.parse("")
 
 
@@ -354,6 +405,8 @@ def build_message(source_name, entry, entry_dt):
     elif "enclosures" in entry and entry["enclosures"]:
         image_url = entry["enclosures"][0].get("href", "")
 
+    hashtags = generate_hashtags(raw_title, source_name)
+
     # ১. ক্রাঞ্চিরোল স্ট্রিমিং ও ডাব রিলিজ
     if source_name == "Crunchyroll Latest Releases":
         anime_name, episode, audio, subs = extract_media_details(raw_title, desc)
@@ -363,7 +416,8 @@ def build_message(source_name, entry, entry_dt):
             f"🔢 <b>Episode: {html.escape(episode)}</b>\n"
             f"🎙 <b>Audio: {html.escape(audio)}</b>\n"
             f"📝 <b>Subtitles: {html.escape(subs)}</b>\n"
-            f"📅 <b>Time: {html.escape(published)}</b>\n"
+            f"📅 <b>Time: {html.escape(published)}</b>\n\n"
+            f"🏷 {hashtags}\n"
             f"{CHANNEL_FOOTER}"
         )
         return msg, f"{anime_name} - {episode}", image_url, link, "Watch on Crunchyroll", True
@@ -378,7 +432,8 @@ def build_message(source_name, entry, entry_dt):
             f"📺 <b>Platform: {html.escape(platform_name)}</b>\n"
             f"🎙 <b>Audio: {html.escape(audio)}</b>\n"
             f"📝 <b>Subtitles: {html.escape(subs)}</b>\n"
-            f"📅 <b>Time: {html.escape(published)}</b>\n"
+            f"📅 <b>Time: {html.escape(published)}</b>\n\n"
+            f"🏷 {hashtags}\n"
             f"{CHANNEL_FOOTER}"
         )
         return msg, anime_name, image_url, link, f"Watch on {platform_name}", True
@@ -394,8 +449,9 @@ def build_message(source_name, entry, entry_dt):
     if key_points:
         msg += f"📌 <b>Key Points:</b>\n• <b>{html.escape(key_points)}</b>\n\n"
     if published:
-        msg += f"📅 <b>{html.escape(published)}</b>\n"
+        msg += f"📅 <b>{html.escape(published)}</b>\n\n"
 
+    msg += f"🏷 {hashtags}\n"
     msg += f"{CHANNEL_FOOTER}"
 
     if not image_url and link:
@@ -418,12 +474,14 @@ def main():
         if rel["id"] in sent_posts:
             continue
 
+        hashtags = generate_hashtags(rel['title'], "Crunchyroll Latest")
         msg = (
             "🚨 <b>#STREAMING_ALERT</b> 🚨\n\n"
             f"🎬 <b>Anime: {html.escape(rel['title'])}</b>\n"
             f"🔢 <b>Episode: {html.escape(rel['episode'])}</b>\n"
             f"🎙 <b>Audio: {html.escape(rel['audio'])}</b>\n"
-            "📝 <b>Subtitles: English</b>\n"
+            "📝 <b>Subtitles: English</b>\n\n"
+            f"🏷 {hashtags}\n"
             f"{CHANNEL_FOOTER}"
         )
         if send_telegram_message(msg, rel["image"], rel["link"], "Watch on Crunchyroll"):
@@ -435,7 +493,7 @@ def main():
     # ২. সমস্ত আরএসএস ফিডস
     for feed_info in RSS_FEEDS:
         source_name = feed_info["name"]
-        feed = fetch_feed(feed_info["url"])
+        feed = fetch_feed(feed_info["url"], source_name)
         if not feed.entries:
             continue
 
@@ -450,11 +508,9 @@ def main():
             if not post_id or post_id in sent_posts:
                 continue
 
-            # ব্লকলিস্ট ফিল্টার
             if is_blocked(raw_title):
                 continue
 
-            # ডুপ্লিকেট নিউজ ফিল্টার (ক্যালেন্ডার ও স্ট্রিমিং বাদে সাধারণ নিউজের ক্ষেত্রে)
             if not any(k in source_name for k in ["Crunchyroll", "Alert"]):
                 if is_title_duplicate(raw_title, recent_titles):
                     print(f"Skipped duplicate news: {raw_title[:40]}...")
