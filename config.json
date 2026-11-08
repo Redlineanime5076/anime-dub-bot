@@ -1,0 +1,103 @@
+{
+  "dry_run": false,
+  "posts_per_feed": 3,
+  "posts_per_cr": 25,
+  "max_history_records": 1500,
+  "title_similarity_threshold": 0.72,
+  "default_image_url": "https://i.postimg.cc/NfGqLbCv/1793778285021.png",
+  "channel_footer": "\n<b>━━━━━━━━━━━━━━━━━━━━━━━━</b>\n📢 <b>Channel: @RedLineAnime</b>\n💬 <b>Don't miss any update, share with your friends!</b>",
+  "blocklist_keywords": [
+    "top 10",
+    "top 5",
+    "ranked",
+    "cosplay",
+    "quiz",
+    "fan art"
+  ],
+  "rss_feeds": [
+    {
+      "name": "AnimeTV News",
+      "url": "https://animetv-jp.net/feed/"
+    },
+    {
+      "name": "Animehinda (Hindi Updates)",
+      "url": "https://animehinda.in/feed/"
+    },
+    {
+      "name": "OtakuOrbit India",
+      "url": "https://otakuorbit.com/feed/"
+    },
+    {
+      "name": "India Anime & Hindi Dub News",
+      "url": "https://news.google.com/rss/search?q=anime+(%22Anime+Society+India%22+OR+%22Hindi+Dub%22+OR+%22AnimeTM%22+OR+%22Crunchyroll+India%22+OR+%22Muse+India%22)&hl=en-IN&gl=IN&ceid=IN:en"
+    },
+    {
+      "name": "Crunchyroll Latest Releases",
+      "url": "https://www.crunchyroll.com/rss/anime"
+    },
+    {
+      "name": "Crunchyroll News",
+      "url": "https://cr-news-api-service.prd.crunchyrollsvc.com/v1/en-US/rss"
+    },
+    {
+      "name": "Netflix Anime Alert",
+      "url": "https://news.google.com/rss/search?q=anime+(%22Netflix%22+OR+%22Netflix+India%22)+(streaming+OR+release+OR+added+OR+episodes)&hl=en-IN&gl=IN&ceid=IN:en"
+    },
+    {
+      "name": "Prime Video Anime Alert",
+      "url": "https://news.google.com/rss/search?q=anime+(%22Prime+Video%22+OR+%22Amazon+Prime%22)+(streaming+OR+release+OR+Hindi+OR+Tamil+OR+Telugu)&hl=en-IN&gl=IN&ceid=IN:en"
+    },
+    {
+      "name": "Disney+ Hotstar Anime Alert",
+      "url": "https://news.google.com/rss/search?q=anime+(%22Disney%2B+Hotstar%22+OR+%22Disney+Plus%22)+(streaming+OR+release+OR+dubbed+OR+Hindi)&hl=en-IN&gl=IN&ceid=IN:en"
+    },
+    {
+      "name": "JioCinema Anime Alert",
+      "url": "https://news.google.com/rss/search?q=anime+(%22JioCinema%22+OR+%22Jio+Cinema%22)+(streaming+OR+release+OR+Hindi+OR+dubbed)&hl=en-IN&gl=IN&ceid=IN:en"
+    },
+    {
+      "name": "Anime News Network",
+      "url": "https://www.animenewsnetwork.com/news/rss.xml"
+    },
+    {
+      "name": "MyAnimeList News",
+      "url": "https://myanimelist.net/rss/news.xml"
+    },
+    {
+      "name": "Anime Corner",
+      "url": "https://animecorner.me/feed/"
+    },
+    {
+      "name": "Anime Trending",
+      "url": "https://anitrendz.net/news/feed/"
+    },
+    {
+      "name": "CBR Anime News",
+      "url": "https://www.cbr.com/feed/category/anime-news/"
+    },
+    {
+      "name": "DualShockers Anime",
+      "url": "https://www.dualshockers.com/feed/category/anime/"
+    },
+    {
+      "name": "Comic Natalie (JP)",
+      "url": "https://news.google.com/rss/search?q=site:natalie.mu/comic&hl=ja&gl=JP&ceid=JP:ja"
+    },
+    {
+      "name": "Manga Adaptation News",
+      "url": "https://news.google.com/rss/search?q=%22manga+gets+anime%22+OR+%22gets+tv+anime%22&hl=en-IN&gl=IN&ceid=IN:en"
+    },
+    {
+      "name": "Anime Season Confirmations",
+      "url": "https://news.google.com/rss/search?q=anime+%22release+date%22+OR+%22season+confirmed%22&hl=en-IN&gl=IN&ceid=IN:en"
+    },
+    {
+      "name": "Anime Trailer Released",
+      "url": "https://news.google.com/rss/search?q=anime+%22official+trailer%22+OR+%22main+trailer%22+released&hl=en-IN&gl=IN&ceid=IN:en"
+    },
+    {
+      "name": "Anime PV/Teaser",
+      "url": "https://news.google.com/rss/search?q=anime+%22promotional+video%22+OR+%22teaser+PV%22&hl=en-IN&gl=IN&ceid=IN:en"
+    }
+  ]
+}
